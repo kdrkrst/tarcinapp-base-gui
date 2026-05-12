@@ -1,13 +1,10 @@
-import { createContext, useContext, useState, useCallback } from 'react'
-import { USERS } from '../data/users'
-import { SERVERS } from '../data/servers'
-import { DUMMY_DATASETS } from '../data/dummyDatasets'
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 
 const AppContext = createContext(null)
 
-const STORAGE_KEY = 'tarcinapp_prefs'
+const STORAGE_KEY = 'tarcinapp_config'
 
-function loadPrefs() {
+function loadConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     return raw ? JSON.parse(raw) : {}
@@ -16,75 +13,160 @@ function loadPrefs() {
   }
 }
 
-function savePrefs(prefs) {
+function saveConfig(cfg) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg))
   } catch {
     // storage unavailable — silently ignore
   }
 }
 
+function normalizeEndpointFromSpec(spec) {
+  const firstServer = spec?.servers?.[0]?.url
+  if (!firstServer || typeof firstServer !== 'string') return null
+  return firstServer.trim() || null
+}
+
+function validateOasSpec(spec) {
+  if (!spec || typeof spec !== 'object') {
+    throw new Error('Uploaded file is not a valid JSON object')
+  }
+  if (!spec.openapi || !spec.paths || typeof spec.paths !== 'object') {
+    throw new Error('Uploaded file is not a valid OpenAPI spec')
+  }
+}
+
 export function AppProvider({ children }) {
-  const prefs = loadPrefs()
+  // Environment variables take priority over stored config (Vite exposes VITE_* vars)
+  const envEndpoint = import.meta.env.VITE_API_ENDPOINT ?? null
+  const envToken = import.meta.env.VITE_API_TOKEN ?? null
 
-  const [selectedUserId, setSelectedUserIdRaw] = useState(
-    prefs.userId ?? USERS[0].id
-  )
-  const [selectedServerUrl, setSelectedServerUrlRaw] = useState(
-    prefs.serverUrl ?? SERVERS[0].url
-  )
-  const [selectedDatasetKey, setSelectedDatasetKeyRaw] = useState(
-    prefs.datasetKey ?? Object.keys(DUMMY_DATASETS)[0]
-  )
-  // When useDummyData is true the API client returns dummy data instead of hitting the real server
-  const [useDummyData, setUseDummyDataRaw] = useState(
-    prefs.useDummyData ?? false
+  const stored = loadConfig()
+
+  const [endpoint, setEndpointRaw] = useState(envEndpoint ?? stored.endpoint ?? null)
+  const [token, setTokenRaw] = useState(envToken ?? stored.token ?? null)
+  const [oasSpec, setOasSpec] = useState(null)
+  // 'idle' | 'loading' | 'success' | 'error'
+  const [oasStatus, setOasStatus] = useState('idle')
+  const [oasError, setOasError] = useState(null)
+
+  const setEndpoint = useCallback(
+    (url) => {
+      const trimmed = url?.trim() || null
+      setEndpointRaw(trimmed)
+      // Don't persist env-provided values (they're already in the environment)
+      if (!envEndpoint) saveConfig({ ...loadConfig(), endpoint: trimmed })
+    },
+    [envEndpoint]
   )
 
-  const setSelectedUserId = useCallback((id) => {
-    setSelectedUserIdRaw(id)
-    savePrefs({ ...loadPrefs(), userId: id })
+  const setToken = useCallback(
+    (t) => {
+      const trimmed = t?.trim() || null
+      setTokenRaw(trimmed)
+      if (!envToken) saveConfig({ ...loadConfig(), token: trimmed })
+    },
+    [envToken]
+  )
+
+  const fetchOasSpec = useCallback(async (ep, tk) => {
+    if (!ep) return
+    setOasStatus('loading')
+    setOasError(null)
+    try {
+      const headers = {}
+      if (tk) headers['Authorization'] = `Bearer ${tk}`
+      const res = await fetch(`${ep}/openapi.json`, { headers })
+      if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`)
+      const spec = await res.json()
+      setOasSpec(spec)
+      setOasStatus('success')
+    } catch (err) {
+      setOasError(err.message ?? 'Failed to fetch OpenAPI spec')
+      setOasStatus('error')
+    }
   }, [])
 
-  const setSelectedServerUrl = useCallback((url) => {
-    setSelectedServerUrlRaw(url)
-    savePrefs({ ...loadPrefs(), serverUrl: url })
+  const connectWithUploadedSpec = useCallback(
+    async ({ spec, endpoint: providedEndpoint, token: providedToken }) => {
+      setOasStatus('loading')
+      setOasError(null)
+      try {
+        validateOasSpec(spec)
+
+        const resolvedEndpoint =
+          providedEndpoint?.trim() || endpoint || normalizeEndpointFromSpec(spec)
+        const resolvedToken = providedToken?.trim() || token || null
+
+        if (resolvedEndpoint) setEndpoint(resolvedEndpoint)
+        if (providedToken !== undefined) setToken(resolvedToken)
+
+        setOasSpec(spec)
+        setOasStatus('success')
+      } catch (err) {
+        setOasError(err?.message ?? 'Failed to load OpenAPI spec from file')
+        setOasStatus('error')
+      }
+    },
+    [endpoint, token, setEndpoint, setToken]
+  )
+
+  // Auto-connect on mount when endpoint is already stored/env-provided
+  useEffect(() => {
+    if (endpoint && oasStatus === 'idle') {
+      fetchOasSpec(endpoint, token)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // intentionally runs only on mount
+
+  /** Called from SetupScreen — stores credentials then fetches spec */
+  const connect = useCallback(
+    async (ep, tk) => {
+      setEndpoint(ep)
+      setToken(tk)
+      await fetchOasSpec(ep, tk)
+    },
+    [setEndpoint, setToken, fetchOasSpec]
+  )
+
+  /** Reset everything and return to the setup screen */
+  const disconnect = useCallback(() => {
+    setEndpointRaw(null)
+    setTokenRaw(null)
+    setOasSpec(null)
+    setOasStatus('idle')
+    setOasError(null)
+    saveConfig({})
   }, [])
 
-  const setSelectedDatasetKey = useCallback((key) => {
-    setSelectedDatasetKeyRaw(key)
-    savePrefs({ ...loadPrefs(), datasetKey: key })
-  }, [])
+  const retry = useCallback(() => fetchOasSpec(endpoint, token), [fetchOasSpec, endpoint, token])
 
-  const setUseDummyData = useCallback((val) => {
-    setUseDummyDataRaw(val)
-    savePrefs({ ...loadPrefs(), useDummyData: val })
-  }, [])
+  const isReady = oasStatus === 'success' && oasSpec !== null
 
-  const currentUser = USERS.find((u) => u.id === selectedUserId) ?? USERS[0]
-  const currentServer = SERVERS.find((s) => s.url === selectedServerUrl) ?? SERVERS[0]
-  const currentDataset = DUMMY_DATASETS[selectedDatasetKey]
+  const serverOptions = Array.isArray(oasSpec?.servers)
+    ? oasSpec.servers
+        .filter((s) => typeof s?.url === 'string' && s.url.trim())
+        .map((s) => ({
+          url: s.url.trim(),
+          description: s.description?.trim() || null,
+        }))
+    : []
 
   return (
     <AppContext.Provider
       value={{
-        // Users
-        users: USERS,
-        selectedUserId,
-        setSelectedUserId,
-        currentUser,
-        // Servers
-        servers: SERVERS,
-        selectedServerUrl,
-        setSelectedServerUrl,
-        currentServer,
-        // Dummy data
-        datasets: DUMMY_DATASETS,
-        selectedDatasetKey,
-        setSelectedDatasetKey,
-        currentDataset,
-        useDummyData,
-        setUseDummyData,
+        endpoint,
+        setEndpoint,
+        token,
+        oasSpec,
+        serverOptions,
+        oasStatus,
+        oasError,
+        isReady,
+        connect,
+        connectWithUploadedSpec,
+        disconnect,
+        retry,
       }}
     >
       {children}
