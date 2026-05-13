@@ -21,6 +21,25 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
+/** Resolve a JSON Pointer $ref from the spec root (e.g. '#/components/schemas/Foo') */
+function resolveRef(spec, ref) {
+  if (!ref?.startsWith('#/')) return null
+  return ref.slice(2).split('/').reduce((cur, part) => cur?.[part], spec) ?? null
+}
+
+/**
+ * Returns the schema for a single item in a collection GET 200 response.
+ * Follows array → items and resolves $ref.
+ */
+function getCollectionItemSchema(spec, collectionPath) {
+  let schema = spec?.paths?.[collectionPath]?.get?.responses?.['200']
+    ?.content?.['application/json']?.schema
+  if (!schema) return null
+  if (schema.type === 'array' && schema.items) schema = schema.items
+  if (schema.$ref) schema = resolveRef(spec, schema.$ref)
+  return schema
+}
+
 /** Returns true when a path string contains at least one {param} segment */
 function hasPathParam(pathStr) {
   return /\{[^}]+\}/.test(pathStr)
@@ -114,23 +133,36 @@ export function parseOasSpec(spec) {
   // Build flat nav items (only tags with a collection path)
   const navItems = Object.values(tagMap)
     .filter((t) => t.collectionPath)
-    .map((t) => ({
-      id: slugify(t.tag),
-      label: t.tag,
-      routePath: `/r/${slugify(t.tag)}`,
+    .map((t) => {
+      const collectionGetParams = Array.isArray(spec?.paths?.[t.collectionPath]?.get?.parameters)
+        ? spec.paths[t.collectionPath].get.parameters
+        : []
+      const hasSearch = collectionGetParams.some((p) => p?.name === 's' && p?.in === 'query')
+
+      const itemSchema = getCollectionItemSchema(spec, t.collectionPath)
+      const schemaProps = itemSchema?.properties ?? {}
+      const hasValidityDates = '_validFromDateTime' in schemaProps || '_validUntilDateTime' in schemaProps
+
+      return ({
+        id: slugify(t.tag),
+        label: t.tag,
+        routePath: `/r/${slugify(t.tag)}`,
       collectionPath: t.collectionPath,
       collectionMethods: ['get', 'post', 'patch', 'put', 'delete'].filter((m) => t.collectionMethods.has(m)),
-      itemPathTemplate: t.itemPathTemplate,
-      itemMethods: ['get', 'put', 'patch', 'delete'].filter((m) => t.itemMethods.has(m)),
-      children: t.traversals.map((tr) => ({
-        id: `${slugify(t.tag)}-${slugify(tr.subResource)}`,
-        label: capitalize(tr.subResource),
-        routePath: `/r/${slugify(t.tag)}/${encodeURIComponent(tr.subResource)}`,
-        pathTemplate: tr.pathTemplate,
-        parentTag: slugify(t.tag),
-        subResource: tr.subResource,
-      })),
-    }))
+        hasSearch,
+        hasValidityDates,
+        itemPathTemplate: t.itemPathTemplate,
+        itemMethods: ['get', 'put', 'patch', 'delete'].filter((m) => t.itemMethods.has(m)),
+        children: t.traversals.map((tr) => ({
+          id: `${slugify(t.tag)}-${slugify(tr.subResource)}`,
+          label: capitalize(tr.subResource),
+          routePath: `/r/${slugify(t.tag)}/${encodeURIComponent(tr.subResource)}`,
+          pathTemplate: tr.pathTemplate,
+          parentTag: slugify(t.tag),
+          subResource: tr.subResource,
+        })),
+      })
+    })
 
   return { navItems, tagMap }
 }
@@ -156,7 +188,7 @@ export function resolvePaginationQueryKeys(spec, pathStr, method = 'get') {
   }
 }
 
-/** System field display order (prefix with _) */
+/** System field display order (prefix with _). Validity date fields are excluded — shown as row status indicator instead. */
 const SYSTEM_FIELD_ORDER = [
   '_id',
   '_name',
@@ -165,9 +197,9 @@ const SYSTEM_FIELD_ORDER = [
   '_createdBy',
   '_createdDateTime',
   '_updatedDateTime',
-  '_validFromDateTime',
-  '_validUntilDateTime',
 ]
+
+const HIDDEN_FIELDS = new Set(['_validFromDateTime', '_validUntilDateTime'])
 
 /**
  * Derive DataGrid column definitions from an array of row objects.
@@ -178,7 +210,9 @@ export function deriveColumns(data) {
 
   const allKeys = new Set()
   for (const row of data) {
-    for (const k of Object.keys(row)) allKeys.add(k)
+    for (const k of Object.keys(row)) {
+      if (!HIDDEN_FIELDS.has(k)) allKeys.add(k)
+    }
   }
 
   const keys = [...allKeys]

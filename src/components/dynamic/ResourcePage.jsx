@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../../context/AppContext'
 import { parseOasSpec, deriveColumns, resolvePaginationQueryKeys } from '../../utils/oasParser'
@@ -69,13 +69,21 @@ function formatQueryPreview(queryString) {
 export default function ResourcePage() {
   const { tagSlug } = useParams()
   const navigate = useNavigate()
-  const { oasSpec } = useApp()
-  const { get, post, del } = useApiClient()
-  const [statusSelections, setStatusSelections] = useState(['actives'])
+  const { oasSpec, endpoint, token } = useApp()
+  const { get, getWithMeta, post, del } = useApiClient()
+  const [statusSelections, setStatusSelections] = useState([])
   const [visibilitySelections, setVisibilitySelections] = useState([])
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(25)
-  const [queryCopied, setQueryCopied] = useState(false)
+  const [queryInfoOpen, setQueryInfoOpen] = useState(false)
+  const [queryDuration, setQueryDuration] = useState(null)
+  const [responseHeaders, setResponseHeaders] = useState(null)
+  const [responseStatus, setResponseStatus] = useState(null)
+  const [curlMode, setCurlMode] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [searchInput, setSearchInput] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const searchDebounceRef = useRef(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [createPayload, setCreatePayload] = useState('{}')
   const [creating, setCreating] = useState(false)
@@ -100,28 +108,15 @@ export default function ResourcePage() {
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildSetQuery(qs, statusSelections, visibilitySelections)
+    if (debouncedSearch) qs.set('s', debouncedSearch)
     return formatQueryPreview(qs)
-  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections])
+  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch])
 
   useEffect(() => {
     setPage(0)
+    setSearchInput('')
+    setDebouncedSearch('')
   }, [navItem?.collectionPath, statusSelections, visibilitySelections])
-
-  useEffect(() => {
-    setQueryCopied(false)
-  }, [querySummary])
-
-  useEffect(() => {
-    if (!queryCopied) return undefined
-
-    const timeoutId = window.setTimeout(() => {
-      setQueryCopied(false)
-    }, 1800)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
-  }, [queryCopied])
 
   useEffect(() => {
     if (!toastError) return undefined
@@ -135,17 +130,31 @@ export default function ResourcePage() {
     }
   }, [toastError])
 
-  const fetcher = useCallback(() => {
-    if (!navItem?.collectionPath) return Promise.resolve([])
-    if (!hasAnySetSelection) return Promise.resolve([])
+  useEffect(() => {
+    if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current)
+    searchDebounceRef.current = window.setTimeout(() => {
+      setDebouncedSearch(searchInput.trim())
+      setPage(0)
+    }, 350)
+    return () => window.clearTimeout(searchDebounceRef.current)
+  }, [searchInput])
+
+  const fetcher = useCallback(async () => {
+    if (!navItem?.collectionPath) return []
 
     const qs = new URLSearchParams()
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildSetQuery(qs, statusSelections, visibilitySelections)
+    if (debouncedSearch) qs.set('s', debouncedSearch)
 
-    return get(`${navItem.collectionPath}?${qs.toString()}`)
-  }, [get, hasAnySetSelection, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections])
+    const start = performance.now()
+    const { data, headers, status } = await getWithMeta(`${navItem.collectionPath}?${qs.toString()}`)
+    setQueryDuration(Math.round(performance.now() - start))
+    setResponseHeaders(headers)
+    setResponseStatus(status)
+    return data ?? []
+  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch])
 
   const { data, loading, error, refresh } = useResourceList(fetcher)
 
@@ -190,6 +199,8 @@ export default function ResourcePage() {
 
   const hasNextPage = data.length === pageSize
 
+  const fullRequestUrl = `${endpoint ?? ''}${navItem?.collectionPath ?? ''}${querySummary}`
+
   const handleRowClick = useCallback(
     (row) => {
       if (!navItem?.itemPathTemplate) return
@@ -217,15 +228,22 @@ export default function ResourcePage() {
     }
   }, [post, navItem?.collectionPath, createPayload, refresh])
 
-  const handleCopyQuery = useCallback(async () => {
-    if (!querySummary) return
+  const curlCommand = useMemo(() => {
+    const lines = [`curl '${fullRequestUrl}'`]
+    if (token) lines.push(`  -H 'Authorization: Bearer ${token}'`)
+    lines.push(`  -H 'Content-Type: application/json'`)
+    return lines.join(' \\\n')
+  }, [fullRequestUrl, token])
+
+  const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(querySummary)
-      setQueryCopied(true)
+      await navigator.clipboard.writeText(curlMode ? curlCommand : fullRequestUrl)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
     } catch {
-      // clipboard access can fail if permissions are denied
+      // clipboard permission denied
     }
-  }, [querySummary])
+  }, [curlMode, curlCommand, fullRequestUrl])
 
   if (!navItem) {
     return (
@@ -236,27 +254,30 @@ export default function ResourcePage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex -m-6 min-h-[calc(100vh-3.5rem)]">
+      <div className="flex-1 p-6 min-w-0 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-xl border border-slate-700 bg-slate-900 p-1">
-            {STATUS_OPTIONS.map((option) => {
-              const selected = statusSelections.includes(option.key)
-              return (
-                <button
-                  key={option.key}
-                  onClick={() => setStatusSelections((current) => toggleSelection(current, option.key))}
-                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
-                    selected
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              )
-            })}
-          </div>
+          {navItem.hasValidityDates && (
+            <div className="inline-flex rounded-xl border border-slate-700 bg-slate-900 p-1">
+              {STATUS_OPTIONS.map((option) => {
+                const selected = statusSelections.includes(option.key)
+                return (
+                  <button
+                    key={option.key}
+                    onClick={() => setStatusSelections((current) => toggleSelection(current, option.key))}
+                    className={`px-3 py-1.5 text-xs rounded-none first:rounded-l-lg last:rounded-r-lg transition-colors ${
+                      selected
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           <div className="inline-flex rounded-xl border border-slate-700 bg-slate-900 p-1">
             {VISIBILITY_OPTIONS.map((option) => {
@@ -265,7 +286,7 @@ export default function ResourcePage() {
                 <button
                   key={option.key}
                   onClick={() => setVisibilitySelections((current) => toggleSelection(current, option.key))}
-                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                  className={`px-3 py-1.5 text-xs rounded-none first:rounded-l-lg last:rounded-r-lg transition-colors ${
                     selected
                       ? 'bg-blue-600 text-white'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -277,6 +298,32 @@ export default function ResourcePage() {
             })}
           </div>
         </div>
+
+        {navItem.hasSearch && (
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
+            </svg>
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by name…"
+              className="pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-52"
+            />
+            {searchInput && (
+              <button
+                onClick={() => setSearchInput('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                aria-label="Clear search"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col items-end gap-2 ml-auto">
           <div className="flex items-center gap-2">
@@ -299,33 +346,20 @@ export default function ResourcePage() {
               Refresh
             </button>
 
-            {hasAnySetSelection && (
-              <div className="relative group">
-                <button
-                  onClick={handleCopyQuery}
-                  className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
-                    queryCopied
-                      ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300'
-                      : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
-                  }`}
-                  title={queryCopied ? 'Copied query' : 'Copy query'}
-                  aria-label="Copy query"
-                >
-                  {queryCopied ? (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  )}
-                </button>
-                <div className="pointer-events-none absolute right-0 top-full z-10 mt-2 hidden w-[min(36rem,80vw)] rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-left text-xs text-slate-300 font-mono shadow-xl break-all group-hover:block">
-                  {querySummary}
-                </div>
-              </div>
-            )}
+            <button
+              onClick={() => setQueryInfoOpen((v) => !v)}
+              className={`flex items-center justify-center w-9 h-9 rounded-lg border ${
+                queryInfoOpen
+                  ? 'bg-blue-700 border-blue-500 text-white'
+                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title="Query info"
+              aria-label="Query info"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -358,23 +392,25 @@ export default function ResourcePage() {
         </div>
       )}
 
-      <DataGrid
-        columns={columns}
-        data={data}
-        loading={loading}
-        error={error}
-        onRefresh={refresh}
-        onRowClick={navItem?.itemPathTemplate ? handleRowClick : undefined}
-      />
+      <div className="overflow-x-auto">
+        <DataGrid
+          columns={columns}
+          data={data}
+          loading={loading}
+          error={error}
+          onRefresh={refresh}
+          onRowClick={navItem?.itemPathTemplate ? handleRowClick : undefined}
+          hasValidityDates={navItem?.hasValidityDates}
+          onRowDelete={canDeleteItem ? handleDeleteRow : undefined}
+        />
+      </div>
 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0 space-y-1">
           {!loading && !error && (
             <div className="flex items-center gap-2 text-xs text-slate-500 font-mono">
               <span>
-                {hasAnySetSelection
-                  ? `${data.length} record(s) returned`
-                  : 'No set filters selected · no backend request'}
+                {`${data.length} record(s) returned`}
               </span>
             </div>
           )}
@@ -419,6 +455,131 @@ export default function ResourcePage() {
       </div>
 
       <Toast message={toastError} onClose={() => setToastError(null)} type="error" />
+      </div>
+
+      {queryInfoOpen && (
+        <div className="w-80 flex-shrink-0 border-l border-slate-700 bg-slate-900 flex flex-col overflow-hidden">
+          {/* Sidebar header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 flex-shrink-0">
+            <span className="text-sm font-semibold text-slate-200">Request Info</span>
+            <button
+              onClick={() => setQueryInfoOpen(false)}
+              className="text-slate-500 hover:text-slate-300"
+              aria-label="Close"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-5">
+
+            {/* ── REQUEST ── */}
+            <div className="space-y-3">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Request</p>
+
+              {/* Method badge + URL/cURL toggle */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-blue-700 text-white tracking-wide">GET</span>
+                <div className="flex items-center bg-slate-800 rounded-md p-0.5 text-xs gap-0.5">
+                  <button
+                    onClick={() => setCurlMode(false)}
+                    className={`px-2.5 py-0.5 rounded transition-colors ${!curlMode ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    URL
+                  </button>
+                  <button
+                    onClick={() => setCurlMode(true)}
+                    className={`px-2.5 py-0.5 rounded transition-colors ${curlMode ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    cURL
+                  </button>
+                </div>
+              </div>
+
+              {/* Copyable URL / cURL box */}
+              <button
+                onClick={handleCopy}
+                className={`w-full text-left text-xs font-mono rounded-lg px-3 py-2 border flex items-start gap-2 group transition-colors ${
+                  copied
+                    ? 'bg-emerald-900/30 border-emerald-700 text-emerald-300'
+                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                <span className="flex-1 break-all whitespace-pre-wrap">{curlMode ? curlCommand : fullRequestUrl}</span>
+                <span className="flex-shrink-0 mt-0.5">
+                  {copied ? (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 transition-colors" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  )}
+                </span>
+              </button>
+
+              {/* Applied filters */}
+              {statusSelections.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Status filter</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {STATUS_OPTIONS.filter((o) => statusSelections.includes(o.key)).map((o) => (
+                      <span key={o.key} className="px-2 py-0.5 text-xs rounded-md bg-blue-600/20 text-blue-300 border border-blue-700">{o.label}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {visibilitySelections.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Visibility filter</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {VISIBILITY_OPTIONS.filter((o) => visibilitySelections.includes(o.key)).map((o) => (
+                      <span key={o.key} className="px-2 py-0.5 text-xs rounded-md bg-violet-600/20 text-violet-300 border border-violet-700">{o.label}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── RESPONSE ── */}
+            {responseStatus !== null && (
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Response</p>
+
+                {/* Status + Duration */}
+                <div className="flex items-center gap-3">
+                  <span className={`px-2 py-0.5 text-xs font-mono font-bold rounded ${responseStatus >= 200 && responseStatus < 300 ? 'bg-emerald-800 text-emerald-100' : 'bg-rose-800 text-rose-100'}`}>
+                    {responseStatus}
+                  </span>
+                  {queryDuration !== null && (
+                    <span className="text-xs text-slate-400 font-mono">{queryDuration} ms</span>
+                  )}
+                </div>
+
+                {/* Response headers */}
+                {responseHeaders && Object.keys(responseHeaders).length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Headers</p>
+                    <div className="rounded-lg border border-slate-800 divide-y divide-slate-800 overflow-hidden">
+                      {Object.entries(responseHeaders).map(([key, value]) => (
+                        <div key={key} className="px-3 py-1.5 bg-slate-950">
+                          <p className="text-[10px] text-slate-500 font-mono">{key}</p>
+                          <p className="text-xs text-slate-300 font-mono break-all">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
     </div>
   )
 }

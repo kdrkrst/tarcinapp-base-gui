@@ -63,6 +63,66 @@ export async function apiFetch(baseUrl, path, token, options = {}) {
 }
 
 /**
+ * Low-level fetch that returns data + response metadata (headers, status).
+ * Same error behaviour as apiFetch.
+ */
+export async function apiFetchWithMeta(baseUrl, path, token, options = {}) {
+  const url = `${baseUrl}${path}`
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...options.headers,
+  }
+
+  let res
+  try {
+    res = await fetch(url, { ...options, headers })
+  } catch (err) {
+    const netErr = new Error(
+      `Network/CORS error while calling ${path}. Check API server reachability and CORS headers. (${err?.message ?? 'fetch failed'})`
+    )
+    netErr.cause = err
+    throw netErr
+  }
+
+  const responseHeaders = {}
+  res.headers.forEach((value, key) => {
+    responseHeaders[key] = value
+  })
+  const status = res.status
+
+  if (!res.ok) {
+    let body
+    try {
+      body = await res.json()
+    } catch {
+      body = { message: res.statusText }
+    }
+    const e = new Error(body?.error?.message ?? body?.message ?? res.statusText)
+    e.status = res.status
+    e.body = body
+    throw e
+  }
+
+  if (res.status === 204) return { data: null, headers: responseHeaders, status }
+
+  const ct = res.headers.get('content-type') ?? ''
+  let data
+  if (ct.includes('application/json')) {
+    data = await res.json()
+  } else {
+    const text = await res.text()
+    if (!text) {
+      data = null
+    } else {
+      try { data = JSON.parse(text) } catch { data = text }
+    }
+  }
+
+  return { data, headers: responseHeaders, status }
+}
+
+/**
  * React hook – returns bound GET/POST/PATCH/DELETE helpers using the current
  * endpoint and token from context.
  */
@@ -71,6 +131,11 @@ export function useApiClient() {
 
   const get = useCallback(
     (path) => apiFetch(endpoint, path, token),
+    [endpoint, token]
+  )
+
+  const getWithMeta = useCallback(
+    (path) => apiFetchWithMeta(endpoint, path, token),
     [endpoint, token]
   )
 
@@ -97,5 +162,5 @@ export function useApiClient() {
     [endpoint, token]
   )
 
-  return useMemo(() => ({ get, post, patch, put, del }), [get, post, patch, put, del])
+  return useMemo(() => ({ get, getWithMeta, post, patch, put, del }), [get, getWithMeta, post, patch, put, del])
 }
