@@ -434,8 +434,9 @@ export default function ResourcePage() {
   )
 
   const columns = useMemo(() => {
-    return deriveColumns(data)
-  }, [data])
+    const all = deriveColumns(data)
+    return all.filter((col) => isFieldChecked(col.key, fieldSelectorState))
+  }, [data, fieldSelectorState])
 
   const hasNextPage = data.length === pageSize
 
