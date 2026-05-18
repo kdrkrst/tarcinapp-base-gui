@@ -307,6 +307,9 @@ export default function ResourcePage() {
   const [fieldSelectorOpen, setFieldSelectorOpen] = useState(false)
   // fieldSelectorState: { mode: 'all'|'exclude'|'none'|'include', selected: Set<string> }
   const [fieldSelectorState, setFieldSelectorState] = useState({ mode: 'all', selected: new Set() })
+  const [selectedQ, setSelectedQ] = useState(null)
+  const [qDropdownOpen, setQDropdownOpen] = useState(false)
+  const qDropdownRef = useRef(null)
   const [queryInfoTab, setQueryInfoTab] = useState('request')
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [requestHeaders, setRequestHeaders] = useState(null)
@@ -320,6 +323,7 @@ export default function ResourcePage() {
   const canCreate = navItem?.collectionMethods?.includes('post')
   const canDeleteItem = navItem?.itemPathTemplate && navItem?.itemMethods?.includes('delete')
   const showFieldSelector = !!(navItem?.hasFilterFields || navItem?.hasFieldset || navItem?.hasFields)
+  const qEnumValues = navItem?.qEnumValues ?? null
   const [fieldSearch, setFieldSearch] = useState('')
 
   const paginationKeys = useMemo(
@@ -335,15 +339,18 @@ export default function ResourcePage() {
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildSetQuery(qs, statusSelections, visibilitySelections)
     if (debouncedSearch) qs.set('s', debouncedSearch)
+    if (selectedQ) qs.set('q', selectedQ)
     buildFilterFieldsParams(qs, fieldSelectorState)
     return formatQueryPreview(qs)
-  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, fieldSelectorState])
+  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, fieldSelectorState])
 
   useEffect(() => {
     setPage(0)
     setSearchInput('')
     setDebouncedSearch('')
     setFieldSelectorState({ mode: 'all', selected: new Set() })
+    setSelectedQ(null)
+    setQDropdownOpen(false)
   }, [navItem?.collectionPath, statusSelections, visibilitySelections])
 
   useEffect(() => {
@@ -357,6 +364,17 @@ export default function ResourcePage() {
       window.clearTimeout(timeoutId)
     }
   }, [toastError])
+
+  useEffect(() => {
+    if (!qDropdownOpen) return undefined
+    const handleClickOutside = (e) => {
+      if (qDropdownRef.current && !qDropdownRef.current.contains(e.target)) {
+        setQDropdownOpen(false)
+      }
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    return () => window.removeEventListener('mousedown', handleClickOutside)
+  }, [qDropdownOpen])
 
   useEffect(() => {
     if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current)
@@ -375,6 +393,7 @@ export default function ResourcePage() {
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildSetQuery(qs, statusSelections, visibilitySelections)
     if (debouncedSearch) qs.set('s', debouncedSearch)
+    if (selectedQ) qs.set('q', selectedQ)
     buildFilterFieldsParams(qs, fieldSelectorState)
 
     const start = performance.now()
@@ -384,7 +403,7 @@ export default function ResourcePage() {
     setResponseStatus(status)
     setRequestHeaders(reqHeaders ?? null)
     return data ?? []
-  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, fieldSelectorState])
+  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, fieldSelectorState])
 
   const { data, loading, error, refresh } = useResourceList(fetcher)
 
@@ -521,6 +540,55 @@ export default function ResourcePage() {
                 <rect x="17" y="3" width="4" height="18" rx="1" strokeLinejoin="round" />
               </svg>
             </button>
+          )}
+
+          {qEnumValues && (
+            <div className="relative" ref={qDropdownRef}>
+              <button
+                onClick={() => setQDropdownOpen((v) => !v)}
+                className={`flex items-center gap-1.5 h-9 px-3 rounded-lg border text-xs font-medium transition-colors ${
+                  selectedQ
+                    ? 'bg-blue-700 border-blue-500 text-white'
+                    : qDropdownOpen
+                    ? 'bg-slate-700 border-slate-500 text-slate-200'
+                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
+                }`}
+                title="Predefined query (q)"
+                aria-label="Select predefined query"
+                aria-expanded={qDropdownOpen}
+              >
+                <span>Q</span>
+                {selectedQ && <span className="text-blue-200 font-mono">: {selectedQ}</span>}
+                <svg className={`w-3 h-3 transition-transform ${qDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {qDropdownOpen && (
+                <div className="absolute left-0 top-full mt-1 z-20 min-w-[10rem] rounded-xl border border-slate-700 bg-slate-900 shadow-xl py-1">
+                  {selectedQ && (
+                    <button
+                      onClick={() => { setSelectedQ(null); setQDropdownOpen(false); setPage(0) }}
+                      className="w-full text-left px-3 py-1.5 text-xs text-slate-500 hover:text-slate-200 hover:bg-slate-800 italic"
+                    >
+                      Clear selection
+                    </button>
+                  )}
+                  {qEnumValues.map((val) => (
+                    <button
+                      key={val}
+                      onClick={() => { setSelectedQ(val); setQDropdownOpen(false); setPage(0) }}
+                      className={`w-full text-left px-3 py-1.5 text-xs font-mono transition-colors ${
+                        selectedQ === val
+                          ? 'bg-blue-700/40 text-blue-300'
+                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      {val}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {navItem.hasValidityDates && (
