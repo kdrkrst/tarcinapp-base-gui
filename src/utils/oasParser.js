@@ -324,3 +324,16 @@ function formatLabel(key) {
     .replace(/^./, (s) => s.toUpperCase())
     .trim()
 }
+
+/**
+ * Returns the resolved POST request body schema for a collection endpoint.
+ * Follows $ref if needed. Returns null if no POST body schema is found.
+ */
+export function getPostBodySchema(spec, collectionPath) {
+  if (!spec || !collectionPath) return null
+  let schema = spec?.paths?.[collectionPath]?.post
+    ?.requestBody?.content?.['application/json']?.schema
+  if (!schema) return null
+  if (schema.$ref) schema = resolveRef(spec, schema.$ref)
+  return schema ?? null
+}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../../context/AppContext'
-import { parseOasSpec, deriveColumns, resolvePaginationQueryKeys } from '../../utils/oasParser'
+import { parseOasSpec, deriveColumns, resolvePaginationQueryKeys, getPostBodySchema } from '../../utils/oasParser'
 import { useApiClient } from '../../services/apiClient'
 import { useResourceList } from '../../hooks/useResourceList'
 import DataGrid from '../ui/DataGrid'
@@ -281,6 +281,156 @@ function IdentityTab({ token }) {
   )
 }
 
+function TagInput({ value, onChange }) {
+  const [inputVal, setInputVal] = useState('')
+  const items = Array.isArray(value) ? value : []
+
+  const commit = () => {
+    const trimmed = inputVal.trim()
+    if (trimmed) onChange([...items, trimmed])
+    setInputVal('')
+  }
+
+  return (
+    <div
+      className="flex flex-wrap gap-1.5 p-2 bg-slate-950 border border-slate-700 rounded-lg min-h-[38px] focus-within:ring-1 focus-within:border-blue-500 focus-within:ring-blue-500 cursor-text"
+      onClick={(e) => { if (e.target === e.currentTarget) e.currentTarget.querySelector('input')?.focus() }}
+    >
+      {items.map((item, idx) => (
+        <span key={idx} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 bg-slate-700 rounded text-xs text-slate-200 font-mono">
+          {item}
+          <button
+            type="button"
+            onClick={() => onChange(items.filter((_, i) => i !== idx))}
+            className="text-slate-500 hover:text-white ml-0.5 leading-none"
+          >
+            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </span>
+      ))}
+      <input
+        type="text"
+        value={inputVal}
+        onChange={(e) => setInputVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit() }
+          if (e.key === 'Backspace' && !inputVal && items.length > 0) onChange(items.slice(0, -1))
+        }}
+        placeholder={items.length === 0 ? 'Type and press Enter…' : ''}
+        className="flex-1 min-w-[120px] bg-transparent text-sm text-slate-200 focus:outline-none placeholder-slate-600"
+      />
+    </div>
+  )
+}
+
+function buildPayloadFromForm(values, fields) {
+  const payload = {}
+  for (const field of fields) {
+    const val = values[field.name]
+    if (field.type === 'boolean') {
+      if (val !== undefined) payload[field.name] = val === true || val === 'true'
+      continue
+    }
+    if (val === undefined || val === null || val === '') continue
+    if (field.type === 'integer') {
+      const n = parseInt(val, 10)
+      if (!isNaN(n)) payload[field.name] = n
+    } else if (field.type === 'number') {
+      const n = parseFloat(val)
+      if (!isNaN(n)) payload[field.name] = n
+    } else if (field.type === 'array') {
+      if (Array.isArray(val)) {
+        if (val.length > 0) payload[field.name] = val
+      } else {
+        try { payload[field.name] = JSON.parse(val) } catch { /* skip invalid JSON */ }
+      }
+    } else if (field.type === 'object') {
+      try { payload[field.name] = JSON.parse(val) } catch { /* skip invalid JSON */ }
+    } else {
+      payload[field.name] = val
+    }
+  }
+  return payload
+}
+
+function renderCreateField(field, value, onChange) {
+  const cls = 'w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+  if (field.type === 'boolean') {
+    const checked = value === true || value === 'true'
+    return (
+      <button
+        type="button"
+        onClick={() => onChange(!checked)}
+        className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+          checked ? 'bg-blue-700 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'
+        }`}
+      >
+        <span className="font-mono">{checked ? 'true' : 'false'}</span>
+      </button>
+    )
+  }
+
+  if (field.enum) {
+    return (
+      <select value={value ?? ''} onChange={(e) => onChange(e.target.value)} className={cls}>
+        <option value="">— select —</option>
+        {field.enum.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+      </select>
+    )
+  }
+
+  if (field.type === 'integer' || field.type === 'number') {
+    return (
+      <input
+        type="number"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        step={field.type === 'integer' ? '1' : 'any'}
+        className={cls}
+      />
+    )
+  }
+
+  if (field.type === 'array') {
+    return <TagInput value={value} onChange={onChange} />
+  }
+
+  if (field.type === 'object') {
+    return (
+      <textarea
+        rows={3}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="{}"
+        className={`${cls} font-mono text-xs`}
+      />
+    )
+  }
+
+  if (field.format === 'date-time') {
+    return (
+      <input
+        type="datetime-local"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        className={cls}
+      />
+    )
+  }
+
+  return (
+    <input
+      type="text"
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+      className={cls}
+    />
+  )
+}
+
 export default function ResourcePage() {
   const { tagSlug } = useParams()
   const navigate = useNavigate()
@@ -303,6 +453,8 @@ export default function ResourcePage() {
   const [createPayload, setCreatePayload] = useState('{}')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState(null)
+  const [createTab, setCreateTab] = useState('form')
+  const [createFormValues, setCreateFormValues] = useState({})
   const [toastError, setToastError] = useState(null)
   const [fieldSelectorOpen, setFieldSelectorOpen] = useState(false)
   // fieldSelectorState: { mode: 'all'|'exclude'|'none'|'include', selected: Set<string> }
@@ -319,6 +471,37 @@ export default function ResourcePage() {
 
   const { navItems } = parseOasSpec(oasSpec)
   const navItem = navItems.find((n) => n.id === tagSlug)
+
+  const postSchema = useMemo(
+    () => getPostBodySchema(oasSpec, navItem?.collectionPath),
+    [oasSpec, navItem?.collectionPath]
+  )
+  const writableFields = useMemo(() => {
+    if (!postSchema?.properties) return []
+    return Object.entries(postSchema.properties)
+      .filter(([, prop]) => !prop.readOnly)
+      .map(([name, prop]) => ({
+        name,
+        type: prop.type ?? 'string',
+        format: prop.format ?? null,
+        enum: Array.isArray(prop.enum) ? prop.enum : null,
+        required: Array.isArray(postSchema.required) && postSchema.required.includes(name),
+        description: prop.description ?? null,
+      }))
+  }, [postSchema])
+
+  // Section 1: _name (if present) + all non-managed (no leading _) fields
+  const primaryCreateFields = useMemo(() => {
+    const nameField = writableFields.find((f) => f.name === '_name')
+    const unmanaged = writableFields.filter((f) => !f.name.startsWith('_'))
+    return nameField ? [nameField, ...unmanaged] : unmanaged
+  }, [writableFields])
+
+  // Section 2: managed (_) fields excluding _name
+  const managedCreateFields = useMemo(
+    () => writableFields.filter((f) => f.name.startsWith('_') && f.name !== '_name'),
+    [writableFields]
+  )
 
   const canCreate = navItem?.collectionMethods?.includes('post')
   const canDeleteItem = navItem?.itemPathTemplate && navItem?.itemMethods?.includes('delete')
@@ -457,10 +640,13 @@ export default function ResourcePage() {
     setCreateError(null)
     setCreating(true)
     try {
-      const payload = JSON.parse(createPayload || '{}')
+      const payload = createTab === 'form'
+        ? buildPayloadFromForm(createFormValues, writableFields)
+        : JSON.parse(createPayload || '{}')
       await post(navItem.collectionPath, payload)
       setCreateOpen(false)
       setCreatePayload('{}')
+      setCreateFormValues({})
       await refresh()
     } catch (err) {
       setCreateError({
@@ -470,7 +656,32 @@ export default function ResourcePage() {
     } finally {
       setCreating(false)
     }
-  }, [post, navItem?.collectionPath, createPayload, refresh])
+  }, [post, navItem?.collectionPath, createTab, createPayload, createFormValues, writableFields, refresh])
+
+  const handleCreateTabSwitch = useCallback((tab) => {
+    if (tab === 'json' && createTab !== 'json') {
+      const payload = buildPayloadFromForm(createFormValues, writableFields)
+      setCreatePayload(JSON.stringify(payload, null, 2))
+    } else if (tab === 'form' && createTab !== 'form') {
+      try {
+        const parsed = JSON.parse(createPayload || '{}')
+        const newValues = {}
+        for (const field of writableFields) {
+          if (parsed[field.name] !== undefined) {
+            if (field.type === 'array') {
+              newValues[field.name] = Array.isArray(parsed[field.name]) ? parsed[field.name] : []
+            } else if (field.type === 'object') {
+              newValues[field.name] = JSON.stringify(parsed[field.name], null, 2)
+            } else {
+              newValues[field.name] = String(parsed[field.name])
+            }
+          }
+        }
+        setCreateFormValues(newValues)
+      } catch { /* invalid JSON, skip sync */ }
+    }
+    setCreateTab(tab)
+  }, [createTab, createFormValues, createPayload, writableFields])
 
   const curlCommand = useMemo(() => {
     const lines = [`curl '${fullRequestUrl}'`]
@@ -666,7 +877,15 @@ export default function ResourcePage() {
           <div className="flex items-center gap-2">
             {canCreate && (
               <button
-                onClick={() => setCreateOpen((v) => !v)}
+                onClick={() => {
+                  if (!createOpen) {
+                    setCreateFormValues({})
+                    setCreatePayload('{}')
+                    setCreateTab('form')
+                    setCreateError(null)
+                  }
+                  setCreateOpen((v) => !v)
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-blue-700 hover:bg-blue-600 border border-blue-600 text-white transition-colors"
               >
                 Add New
@@ -792,15 +1011,89 @@ export default function ResourcePage() {
       )}
 
       {createOpen && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
-          <p className="text-sm text-slate-300">Create new item (JSON body)</p>
-          <textarea
-            rows={10}
-            value={createPayload}
-            onChange={(e) => setCreatePayload(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-          <div className="flex items-center gap-2">
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-4">
+          {/* Header + tab switcher */}
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-slate-200">Create new item</p>
+            {writableFields.length > 0 && (
+              <div className="flex rounded-lg overflow-hidden border border-slate-700 text-xs">
+                <button
+                  onClick={() => handleCreateTabSwitch('form')}
+                  className={`px-3 py-1.5 transition-colors ${createTab === 'form' ? 'bg-blue-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                >
+                  Form
+                </button>
+                <button
+                  onClick={() => handleCreateTabSwitch('json')}
+                  className={`px-3 py-1.5 transition-colors border-l border-slate-700 ${createTab === 'json' ? 'bg-blue-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                >
+                  JSON
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Form tab */}
+          {createTab === 'form' && writableFields.length > 0 && (
+            <div className="space-y-3">
+              {primaryCreateFields.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                  {primaryCreateFields.map((field) => (
+                    <div key={field.name} className="flex flex-col gap-1">
+                      <label className="text-xs text-slate-400 font-mono flex items-center gap-0.5">
+                        {field.name}
+                        {field.required && <span className="text-red-400">*</span>}
+                      </label>
+                      {renderCreateField(
+                        field,
+                        createFormValues[field.name],
+                        (v) => setCreateFormValues((prev) => ({ ...prev, [field.name]: v }))
+                      )}
+                      {field.description && (
+                        <p className="text-[10px] text-slate-500">{field.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {primaryCreateFields.length > 0 && managedCreateFields.length > 0 && (
+                <hr className="border-slate-700" />
+              )}
+              {managedCreateFields.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                  {managedCreateFields.map((field) => (
+                    <div key={field.name} className="flex flex-col gap-1">
+                      <label className="text-xs text-slate-400 font-mono flex items-center gap-0.5">
+                        {field.name}
+                        {field.required && <span className="text-red-400">*</span>}
+                      </label>
+                      {renderCreateField(
+                        field,
+                        createFormValues[field.name],
+                        (v) => setCreateFormValues((prev) => ({ ...prev, [field.name]: v }))
+                      )}
+                      {field.description && (
+                        <p className="text-[10px] text-slate-500">{field.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* JSON tab (or fallback when no schema) */}
+          {(createTab === 'json' || writableFields.length === 0) && (
+            <textarea
+              rows={12}
+              value={createPayload}
+              onChange={(e) => setCreatePayload(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 pt-1">
             <button
               onClick={handleCreate}
               disabled={creating}
@@ -815,6 +1108,8 @@ export default function ResourcePage() {
               Cancel
             </button>
           </div>
+
+          {/* Validation errors */}
           {createError && (
             <div className="text-red-400 text-sm space-y-1">
               <p>{createError.message}</p>
