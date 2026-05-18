@@ -3,6 +3,16 @@ import { NavLink } from 'react-router-dom'
 import { useApp } from '../../context/AppContext'
 import { parseOasSpec } from '../../utils/oasParser'
 
+// Icon path per base type — used as a visual indicator on each nav item
+const BASE_TYPE_ICON = {
+  entity:           'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
+  list:             'M4 6h16M4 10h16M4 14h16M4 18h16',
+  relation:         'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1',
+  'entity-reaction':'M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  'list-reaction':  'M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z',
+  unknown:          'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10',
+}
+
 function NavIcon({ d, size = 'w-4 h-4' }) {
   return (
     <svg
@@ -72,72 +82,75 @@ export default function Sidebar({ collapsed = false, onToggle }) {
         </NavLink>
 
         {navItems.length > 0 && !collapsed && (
-          <p className="px-2 mt-4 mb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          <p className="px-2 pt-4 pb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">
             Resources
           </p>
         )}
 
-        {navItems.map((item) => (
-          <div key={item.id}>
-            <div className="flex items-center">
-              <NavLink
-                to={item.routePath}
-                title={collapsed ? item.label : undefined}
-                className={({ isActive }) =>
-                  `flex items-center rounded-lg text-sm transition-all duration-150 ${
-                    collapsed ? 'flex-1 justify-center px-0 py-2.5' : 'flex-1 gap-3 px-3 py-2.5'
-                  } ${
-                    isActive
-                      ? 'bg-blue-600 text-white font-medium'
-                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
-                  }`
-                }
-              >
-                <NavIcon d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                {!collapsed && item.label}
-              </NavLink>
-
-              {!collapsed && item.children.length > 0 && (
-                <button
-                  onClick={() => toggle(item.id)}
-                  className="p-1.5 mr-1 rounded text-slate-500 hover:text-slate-300 transition-colors"
-                  aria-label={expanded[item.id] ? 'Collapse' : 'Expand'}
+        {navItems.map((item) => {
+          const iconPath = BASE_TYPE_ICON[item.baseType ?? 'unknown'] ?? BASE_TYPE_ICON.unknown
+          return (
+            <div key={item.id}>
+              <div className="flex items-center">
+                <NavLink
+                  to={item.routePath}
+                  title={collapsed ? item.label : undefined}
+                  className={({ isActive }) =>
+                    `flex items-center rounded-lg text-sm transition-all duration-150 ${
+                      collapsed ? 'flex-1 justify-center px-0 py-2.5' : 'flex-1 gap-3 px-3 py-2.5'
+                    } ${
+                      isActive
+                        ? 'bg-blue-600 text-white font-medium'
+                        : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+                    }`
+                  }
                 >
-                  <svg
-                    className={`w-3.5 h-3.5 transition-transform duration-150 ${expanded[item.id] ? 'rotate-90' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    viewBox="0 0 24 24"
+                  <NavIcon d={iconPath} />
+                  {!collapsed && item.label}
+                </NavLink>
+
+                {!collapsed && item.children.length > 0 && (
+                  <button
+                    onClick={() => toggle(item.id)}
+                    className="p-1.5 mr-1 rounded text-slate-500 hover:text-slate-300 transition-colors"
+                    aria-label={expanded[item.id] ? 'Collapse' : 'Expand'}
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
+                    <svg
+                      className={`w-3.5 h-3.5 transition-transform duration-150 ${expanded[item.id] ? 'rotate-90' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {!collapsed && expanded[item.id] && item.children.length > 0 && (
+                <div className="ml-4 mt-0.5 pl-2 border-l border-slate-800 space-y-0.5">
+                  {item.children.map((child) => (
+                    <NavLink
+                      key={child.id}
+                      to={child.routePath}
+                      className={({ isActive }) =>
+                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all duration-150 ${
+                          isActive
+                            ? 'bg-blue-600/80 text-white font-medium'
+                            : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'
+                        }`
+                      }
+                    >
+                      <NavIcon d="M7 16l-4-4m0 0l4-4m-4 4h18" />
+                      {child.label}
+                    </NavLink>
+                  ))}
+                </div>
               )}
             </div>
-
-            {!collapsed && expanded[item.id] && item.children.length > 0 && (
-              <div className="ml-4 mt-0.5 pl-2 border-l border-slate-800 space-y-0.5">
-                {item.children.map((child) => (
-                  <NavLink
-                    key={child.id}
-                    to={child.routePath}
-                    className={({ isActive }) =>
-                      `flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all duration-150 ${
-                        isActive
-                          ? 'bg-blue-600/80 text-white font-medium'
-                          : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'
-                      }`
-                    }
-                  >
-                    <NavIcon d="M7 16l-4-4m0 0l4-4m-4 4h18" />
-                    {child.label}
-                  </NavLink>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+          )
+        })}
       </nav>
 
       {/* Disconnect */}

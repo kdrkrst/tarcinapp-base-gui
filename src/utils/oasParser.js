@@ -57,6 +57,46 @@ function traversalSubResource(pathStr) {
 }
 
 /**
+ * Normalizes a base record type value from the OAS x-base-record-type extension
+ * into a consistent kebab-case string used throughout the UI.
+ * Accepts camelCase (entityReaction, listReaction) from the OAS extension, and
+ * kebab-case from the path-segment fallback.
+ */
+const BASE_TYPE_NORMALIZE = {
+  entity: 'entity',
+  list: 'list',
+  relation: 'relation',
+  entityReaction: 'entity-reaction',
+  'entity-reaction': 'entity-reaction',
+  listReaction: 'list-reaction',
+  'list-reaction': 'list-reaction',
+}
+
+function normalizeBaseType(raw) {
+  if (!raw) return null
+  return BASE_TYPE_NORMALIZE[raw] ?? null
+}
+
+/**
+ * Derives the base record type from a collection path as a fallback.
+ * Looks for a known plural segment (entities, lists, relations, …) in the path.
+ */
+function deriveBaseTypeFromPath(collectionPath) {
+  if (!collectionPath) return null
+  const PATH_SEGMENT_MAP = {
+    entities: 'entity',
+    lists: 'list',
+    relations: 'relation',
+    'entity-reactions': 'entity-reaction',
+    'list-reactions': 'list-reaction',
+  }
+  for (const seg of collectionPath.replace(/^\//, '').split('/')) {
+    if (PATH_SEGMENT_MAP[seg]) return PATH_SEGMENT_MAP[seg]
+  }
+  return null
+}
+
+/**
  * Parse an OAS spec and return nav items + tag map.
  *
  * @param {object} spec  OpenAPI 3.x spec
@@ -70,6 +110,18 @@ function traversalSubResource(pathStr) {
  */
 export function parseOasSpec(spec) {
   if (!spec?.paths) return { navItems: [], tagMap: {} }
+
+  // Build a lookup of tag name → baseType from the top-level tags array.
+  // Primary source: tag.extensions['x-base-record-type'] (set by the backend).
+  // Also handles flat tag['x-base-record-type'] for standard OAS serializers.
+  const tagBaseTypeMap = {}
+  for (const tagDef of spec.tags ?? []) {
+    if (!tagDef?.name) continue
+    const raw = tagDef.extensions?.['x-base-record-type']
+      ?? tagDef['x-base-record-type']
+      ?? null
+    tagBaseTypeMap[tagDef.name] = normalizeBaseType(raw)
+  }
 
   // tagMap: { [tagName]: { tag, collectionPath, collectionMethods, itemPathTemplate, itemMethods, traversals } }
   const tagMap = {}
@@ -159,9 +211,13 @@ export function parseOasSpec(spec) {
       // Derive available field names from the response schema properties (all fields, including validity dates)
       const availableFields = Object.keys(schemaProps)
 
+      // Prefer the extension value from spec.tags; fall back to path-segment detection.
+      const baseType = tagBaseTypeMap[t.tag] ?? deriveBaseTypeFromPath(t.collectionPath)
+
       return ({
         id: slugify(t.tag),
         label: t.tag,
+        baseType,
         routePath: `/r/${slugify(t.tag)}`,
       collectionPath: t.collectionPath,
       collectionMethods: ['get', 'post', 'patch', 'put', 'delete'].filter((m) => t.collectionMethods.has(m)),
@@ -184,6 +240,15 @@ export function parseOasSpec(spec) {
         })),
       })
     })
+
+  const BASE_TYPE_ORDER = ['entity', 'list', 'relation', 'entity-reaction', 'list-reaction']
+  navItems.sort((a, b) => {
+    const ai = BASE_TYPE_ORDER.indexOf(a.baseType)
+    const bi = BASE_TYPE_ORDER.indexOf(b.baseType)
+    const ao = ai === -1 ? BASE_TYPE_ORDER.length : ai
+    const bo = bi === -1 ? BASE_TYPE_ORDER.length : bi
+    return ao - bo
+  })
 
   return { navItems, tagMap }
 }
