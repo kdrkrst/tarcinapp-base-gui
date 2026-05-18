@@ -45,6 +45,7 @@ export function AppProvider({ children }) {
 
   const [endpoint, setEndpointRaw] = useState(envEndpoint ?? stored.endpoint ?? null)
   const [token, setTokenRaw] = useState(envToken ?? stored.token ?? null)
+  const [bypassCache, setBypassCacheRaw] = useState(stored.bypassCache ?? false)
   const [oasSpec, setOasSpec] = useState(null)
   // 'idle' | 'loading' | 'success' | 'error'
   const [oasStatus, setOasStatus] = useState('idle')
@@ -68,6 +69,11 @@ export function AppProvider({ children }) {
     },
     [envToken]
   )
+
+  const setBypassCache = useCallback((val) => {
+    setBypassCacheRaw(val)
+    saveConfig({ ...loadConfig(), bypassCache: val })
+  }, [])
 
   const fetchOasSpec = useCallback(async (ep, tk) => {
     if (!ep) return
@@ -158,6 +164,8 @@ export function AppProvider({ children }) {
         endpoint,
         setEndpoint,
         token,
+        bypassCache,
+        setBypassCache,
         oasSpec,
         serverOptions,
         oasStatus,

@@ -2,9 +2,9 @@ import { useLocation } from 'react-router-dom'
 import { useApp } from '../../context/AppContext'
 import { parseOasSpec } from '../../utils/oasParser'
 
-export default function TopBar() {
+export default function TopBar({ onToggleSidebar }) {
   const location = useLocation()
-  const { oasSpec, endpoint, setEndpoint, serverOptions, token } = useApp()
+  const { oasSpec, endpoint, setEndpoint, serverOptions, token, bypassCache, setBypassCache } = useApp()
   const { navItems } = oasSpec ? parseOasSpec(oasSpec) : { navItems: [] }
 
   const endpointChoices =
@@ -42,8 +42,19 @@ export default function TopBar() {
 
   return (
     <header className="flex items-center justify-between h-14 px-6 bg-gray-950 border-b border-slate-800 flex-shrink-0">
-      {/* Page title */}
-      <h1 className="text-base font-semibold text-slate-100">{getTitle()}</h1>
+      {/* Left: hamburger + page title */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onToggleSidebar}
+          className="p-1.5 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
+          aria-label="Toggle sidebar"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <h1 className="text-base font-semibold text-slate-100">{getTitle()}</h1>
+      </div>
 
       {/* Right: endpoint selector + auth indicator */}
       <div className="flex items-center gap-3">
@@ -73,14 +84,23 @@ export default function TopBar() {
           </div>
         )}
 
-        {oasSpec && (
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700">
-            <span className="text-xs text-slate-400">
-              {oasSpec.info?.title ?? 'API'}{' '}
-              <span className="text-slate-500">v{oasSpec.info?.version ?? '?'}</span>
-            </span>
-          </div>
-        )}
+        <button
+          onClick={() => setBypassCache(!bypassCache)}
+          title={bypassCache ? 'Cache bypass ON — click to enable cache' : 'Cache enabled — click to bypass cache'}
+          aria-pressed={bypassCache}
+          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md border transition-colors ${
+            bypassCache
+              ? 'bg-amber-900/40 border-amber-600/60 text-amber-400 hover:bg-amber-900/60'
+              : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 5.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+          </svg>
+          <span className="text-xs font-medium">{bypassCache ? 'Cache OFF' : 'Cache ON'}</span>
+        </button>
+
+
       </div>
     </header>
   )

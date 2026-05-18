@@ -66,6 +66,221 @@ function formatQueryPreview(queryString) {
   return entries.length ? `?${entries.join('&')}` : ''
 }
 
+/**
+ * Toggles a field in the field selector state machine.
+ * Modes:
+ *   'all'     – all fields selected, no filter[fields] params
+ *   'exclude' – some fields unchecked, send filter[fields][x]=false for excluded
+ *   'none'    – all unchecked, no params
+ *   'include' – some re-checked after none, send filter[fields][x]=true for included
+ */
+function toggleFieldSelection(fieldName, allFields, current) {
+  const { mode, selected } = current
+
+  if (mode === 'all') {
+    return { mode: 'exclude', selected: new Set([fieldName]) }
+  }
+
+  if (mode === 'exclude') {
+    const isChecked = !selected.has(fieldName)
+    if (isChecked) {
+      // unchecking → add to excludes
+      const next = new Set(selected)
+      next.add(fieldName)
+      return next.size === allFields.length
+        ? { mode: 'none', selected: new Set() }
+        : { mode: 'exclude', selected: next }
+    } else {
+      // re-checking → remove from excludes
+      const next = new Set(selected)
+      next.delete(fieldName)
+      return next.size === 0
+        ? { mode: 'all', selected: new Set() }
+        : { mode: 'exclude', selected: next }
+    }
+  }
+
+  if (mode === 'none') {
+    return { mode: 'include', selected: new Set([fieldName]) }
+  }
+
+  // mode === 'include'
+  const isChecked = selected.has(fieldName)
+  if (isChecked) {
+    const next = new Set(selected)
+    next.delete(fieldName)
+    return next.size === 0
+      ? { mode: 'none', selected: new Set() }
+      : { mode: 'include', selected: next }
+  } else {
+    const next = new Set(selected)
+    next.add(fieldName)
+    return { mode: 'include', selected: next }
+  }
+}
+
+function isFieldChecked(fieldName, fieldSelectorState) {
+  const { mode, selected } = fieldSelectorState
+  if (mode === 'all') return true
+  if (mode === 'exclude') return !selected.has(fieldName)
+  if (mode === 'none') return false
+  return selected.has(fieldName) // 'include'
+}
+
+function buildFilterFieldsParams(qs, fieldSelectorState) {
+  const { mode, selected } = fieldSelectorState
+  if (mode === 'exclude') {
+    for (const f of selected) qs.set(`filter[fields][${f}]`, 'false')
+  } else if (mode === 'include') {
+    for (const f of selected) qs.set(`filter[fields][${f}]`, 'true')
+  }
+}
+
+function parseJwt(token) {
+  if (!token) return null
+  const parts = token.split('.')
+  if (parts.length !== 3) return null
+  try {
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4)
+    return JSON.parse(atob(padded))
+  } catch {
+    return null
+  }
+}
+
+function formatClaimValue(value) {
+  if (value === null || value === undefined) return <span className="text-slate-500 italic">null</span>
+  if (typeof value === 'boolean') return <span className="text-amber-400 font-mono">{String(value)}</span>
+  if (typeof value === 'number') return <span className="text-sky-400 font-mono">{value}</span>
+  if (Array.isArray(value)) {
+    return (
+      <div className="flex flex-wrap gap-1 mt-0.5">
+        {value.map((v, i) => (
+          <span key={i} className="px-1.5 py-0.5 text-[10px] rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono">{String(v)}</span>
+        ))}
+      </div>
+    )
+  }
+  if (typeof value === 'object') {
+    return <span className="text-slate-400 font-mono text-[10px] break-all">{JSON.stringify(value)}</span>
+  }
+  return <span className="text-slate-300 font-mono break-all">{String(value)}</span>
+}
+
+function IdentityTab({ token }) {
+  const claims = parseJwt(token)
+
+  if (!token) {
+    return (
+      <div className="flex items-center justify-center h-32 text-slate-600 text-xs">
+        No token configured.
+      </div>
+    )
+  }
+
+  if (!claims) {
+    return (
+      <div className="flex items-center justify-center h-32 text-slate-600 text-xs">
+        Token is not a valid JWT.
+      </div>
+    )
+  }
+
+  const now = Math.floor(Date.now() / 1000)
+  const exp = typeof claims.exp === 'number' ? claims.exp : null
+  const iat = typeof claims.iat === 'number' ? claims.iat : null
+  const isExpired = exp !== null && now > exp
+
+  const roles = claims.roles ?? claims.role ?? claims.realm_access?.roles ?? null
+  const rolesArray = Array.isArray(roles) ? roles : (roles != null ? [roles] : null)
+
+  const SPECIAL_KEYS = new Set(['roles', 'role', 'realm_access', 'exp', 'iat', 'nbf', 'sub', 'iss', 'aud', 'jti'])
+  const genericClaims = Object.entries(claims).filter(([k]) => !SPECIAL_KEYS.has(k))
+
+  function fmtTime(ts) {
+    return new Date(ts * 1000).toLocaleString()
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Token status */}
+      <div className="flex items-center gap-2">
+        <span className={`px-2 py-0.5 text-xs font-mono font-bold rounded ${isExpired ? 'bg-rose-800 text-rose-100' : 'bg-emerald-800 text-emerald-100'}`}>
+          {isExpired ? 'Expired' : 'Valid'}
+        </span>
+        {exp !== null && (
+          <span className="text-[10px] text-slate-500 font-mono">{isExpired ? 'Expired' : 'Expires'} {fmtTime(exp)}</span>
+        )}
+      </div>
+
+      {/* Roles */}
+      {rolesArray !== null && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Roles</p>
+          <div className="flex flex-wrap gap-1.5">
+            {rolesArray.length === 0
+              ? <span className="text-xs text-slate-600 italic">No roles</span>
+              : rolesArray.map((r) => (
+                  <span key={r} className="px-2 py-0.5 text-xs rounded-md bg-violet-600/20 text-violet-300 border border-violet-700 font-mono">{r}</span>
+                ))
+            }
+          </div>
+        </div>
+      )}
+
+      {/* Subject / Issuer / Audience / JTI */}
+      {(claims.sub || claims.iss || claims.aud || claims.jti) && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Identity</p>
+          <div className="rounded-lg border border-slate-800 divide-y divide-slate-800 overflow-hidden">
+            {[['sub', claims.sub], ['iss', claims.iss], ['aud', claims.aud], ['jti', claims.jti]]
+              .filter(([, v]) => v != null)
+              .map(([key, value]) => (
+                <div key={key} className="px-3 py-1.5 bg-slate-950">
+                  <p className="text-[10px] text-slate-500 font-mono">{key}</p>
+                  <div className="text-xs mt-0.5">{formatClaimValue(value)}</div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* Timestamps */}
+      {(iat !== null || exp !== null || claims.nbf != null) && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Timestamps</p>
+          <div className="rounded-lg border border-slate-800 divide-y divide-slate-800 overflow-hidden">
+            {[['iat', iat], ['exp', exp], ['nbf', claims.nbf]]
+              .filter(([, v]) => v != null)
+              .map(([key, ts]) => (
+                <div key={key} className="px-3 py-1.5 bg-slate-950">
+                  <p className="text-[10px] text-slate-500 font-mono">{key}</p>
+                  <p className="text-xs text-slate-300 font-mono">{fmtTime(ts)}</p>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* All other claims */}
+      {genericClaims.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Claims</p>
+          <div className="rounded-lg border border-slate-800 divide-y divide-slate-800 overflow-hidden">
+            {genericClaims.map(([key, value]) => (
+              <div key={key} className="px-3 py-1.5 bg-slate-950">
+                <p className="text-[10px] text-slate-500 font-mono">{key}</p>
+                <div className="text-xs mt-0.5">{formatClaimValue(value)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ResourcePage() {
   const { tagSlug } = useParams()
   const navigate = useNavigate()
@@ -89,12 +304,23 @@ export default function ResourcePage() {
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState(null)
   const [toastError, setToastError] = useState(null)
+  const [fieldSelectorOpen, setFieldSelectorOpen] = useState(false)
+  // fieldSelectorState: { mode: 'all'|'exclude'|'none'|'include', selected: Set<string> }
+  const [fieldSelectorState, setFieldSelectorState] = useState({ mode: 'all', selected: new Set() })
+  const [queryInfoTab, setQueryInfoTab] = useState('request')
+  const [sidebarWidth, setSidebarWidth] = useState(320)
+  const [requestHeaders, setRequestHeaders] = useState(null)
+  const isResizing = useRef(false)
+  const resizeStartX = useRef(0)
+  const resizeStartWidth = useRef(0)
 
   const { navItems } = parseOasSpec(oasSpec)
   const navItem = navItems.find((n) => n.id === tagSlug)
 
   const canCreate = navItem?.collectionMethods?.includes('post')
   const canDeleteItem = navItem?.itemPathTemplate && navItem?.itemMethods?.includes('delete')
+  const showFieldSelector = !!(navItem?.hasFilterFields || navItem?.hasFieldset || navItem?.hasFields)
+  const [fieldSearch, setFieldSearch] = useState('')
 
   const paginationKeys = useMemo(
     () => resolvePaginationQueryKeys(oasSpec, navItem?.collectionPath, 'get'),
@@ -109,13 +335,15 @@ export default function ResourcePage() {
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildSetQuery(qs, statusSelections, visibilitySelections)
     if (debouncedSearch) qs.set('s', debouncedSearch)
+    buildFilterFieldsParams(qs, fieldSelectorState)
     return formatQueryPreview(qs)
-  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch])
+  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, fieldSelectorState])
 
   useEffect(() => {
     setPage(0)
     setSearchInput('')
     setDebouncedSearch('')
+    setFieldSelectorState({ mode: 'all', selected: new Set() })
   }, [navItem?.collectionPath, statusSelections, visibilitySelections])
 
   useEffect(() => {
@@ -147,16 +375,29 @@ export default function ResourcePage() {
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildSetQuery(qs, statusSelections, visibilitySelections)
     if (debouncedSearch) qs.set('s', debouncedSearch)
+    buildFilterFieldsParams(qs, fieldSelectorState)
 
     const start = performance.now()
-    const { data, headers, status } = await getWithMeta(`${navItem.collectionPath}?${qs.toString()}`)
+    const { data, headers, status, requestHeaders: reqHeaders } = await getWithMeta(`${navItem.collectionPath}?${qs.toString()}`)
     setQueryDuration(Math.round(performance.now() - start))
     setResponseHeaders(headers)
     setResponseStatus(status)
+    setRequestHeaders(reqHeaders ?? null)
     return data ?? []
-  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch])
+  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, fieldSelectorState])
 
   const { data, loading, error, refresh } = useResourceList(fetcher)
+
+  // Merge schema fields with fields discovered from actual response data
+  const availableFields = useMemo(() => {
+    const fromSchema = navItem?.availableFields ?? []
+    const fromData = new Set()
+    for (const row of data) {
+      for (const k of Object.keys(row)) fromData.add(k)
+    }
+    const merged = new Set([...fromSchema, ...fromData])
+    return [...merged].sort()
+  }, [navItem?.availableFields, data])
 
   const handleDeleteRow = useCallback(
     async (row) => {
@@ -174,28 +415,8 @@ export default function ResourcePage() {
   )
 
   const columns = useMemo(() => {
-    const base = deriveColumns(data)
-
-    if (canDeleteItem) {
-      base.push({
-        key: '__actions',
-        label: 'Actions',
-        render: (_, row) => (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              handleDeleteRow(row)
-            }}
-            className="px-2.5 py-1 text-xs rounded-md bg-rose-900/50 hover:bg-rose-800 text-rose-200 border border-rose-800"
-          >
-            Delete
-          </button>
-        ),
-      })
-    }
-
-    return base
-  }, [data, canDeleteItem, handleDeleteRow])
+    return deriveColumns(data)
+  }, [data])
 
   const hasNextPage = data.length === pageSize
 
@@ -230,10 +451,12 @@ export default function ResourcePage() {
 
   const curlCommand = useMemo(() => {
     const lines = [`curl '${fullRequestUrl}'`]
-    if (token) lines.push(`  -H 'Authorization: Bearer ${token}'`)
-    lines.push(`  -H 'Content-Type: application/json'`)
+    const hdrs = requestHeaders ?? (token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' })
+    for (const [key, value] of Object.entries(hdrs)) {
+      lines.push(`  -H '${key}: ${value}'`)
+    }
     return lines.join(' \\\n')
-  }, [fullRequestUrl, token])
+  }, [fullRequestUrl, requestHeaders, token])
 
   const handleCopy = useCallback(async () => {
     try {
@@ -244,6 +467,28 @@ export default function ResourcePage() {
       // clipboard permission denied
     }
   }, [curlMode, curlCommand, fullRequestUrl])
+
+  const handleResizeMouseDown = useCallback((e) => {
+    isResizing.current = true
+    resizeStartX.current = e.clientX
+    resizeStartWidth.current = sidebarWidth
+
+    const onMouseMove = (ev) => {
+      if (!isResizing.current) return
+      const delta = resizeStartX.current - ev.clientX
+      const next = Math.min(800, Math.max(240, resizeStartWidth.current + delta))
+      setSidebarWidth(next)
+    }
+
+    const onMouseUp = () => {
+      isResizing.current = false
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }, [sidebarWidth])
 
   if (!navItem) {
     return (
@@ -258,6 +503,26 @@ export default function ResourcePage() {
       <div className="flex-1 p-6 min-w-0 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
+          {showFieldSelector && (
+            <button
+              onClick={() => setFieldSelectorOpen((v) => !v)}
+              className={`flex items-center justify-center w-9 h-9 rounded-lg border ${
+                fieldSelectorOpen
+                  ? 'bg-blue-700 border-blue-500 text-white'
+                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title="Select fields"
+              aria-label="Select fields"
+            >
+              {/* Columns icon — three vertical bars */}
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="4" height="18" rx="1" strokeLinejoin="round" />
+                <rect x="10" y="3" width="4" height="18" rx="1" strokeLinejoin="round" />
+                <rect x="17" y="3" width="4" height="18" rx="1" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
+
           {navItem.hasValidityDates && (
             <div className="inline-flex rounded-xl border border-slate-700 bg-slate-900 p-1">
               {STATUS_OPTIONS.map((option) => {
@@ -309,7 +574,7 @@ export default function ResourcePage() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search by name…"
-              className="pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-52"
+              className="pl-8 pr-3 py-2.5 text-xs rounded-xl bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-52"
             />
             {searchInput && (
               <button
@@ -363,6 +628,96 @@ export default function ResourcePage() {
           </div>
         </div>
       </div>
+
+      {fieldSelectorOpen && showFieldSelector && (
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-slate-200">Select Fields</p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setFieldSelectorState({ mode: 'all', selected: new Set() })}
+                className="text-xs text-slate-400 hover:text-slate-200 underline"
+              >
+                Select all
+              </button>
+              <button
+                onClick={() => setFieldSelectorState({ mode: 'none', selected: new Set() })}
+                className="text-xs text-slate-400 hover:text-slate-200 underline"
+              >
+                Deselect all
+              </button>
+            </div>
+          </div>
+
+          {/* Search within fields */}
+          <div className="relative">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
+            </svg>
+            <input
+              type="text"
+              value={fieldSearch}
+              onChange={(e) => setFieldSearch(e.target.value)}
+              placeholder="Filter fields…"
+              className="w-full pl-7 pr-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+            {fieldSearch && (
+              <button
+                onClick={() => setFieldSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                aria-label="Clear field search"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {availableFields.length === 0 ? (
+            <p className="text-xs text-slate-500">No fields found in schema or response.</p>
+          ) : (() => {
+            const filtered = fieldSearch
+              ? availableFields.filter((f) => f.toLowerCase().includes(fieldSearch.toLowerCase()))
+              : availableFields
+            return filtered.length === 0 ? (
+              <p className="text-xs text-slate-500">No fields match &ldquo;{fieldSearch}&rdquo;.</p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-2">
+                {filtered.map((field) => {
+                  const checked = isFieldChecked(field, fieldSelectorState)
+                  return (
+                    <label key={field} className="flex items-center gap-2 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setFieldSelectorState((prev) =>
+                            toggleFieldSelection(field, availableFields, prev)
+                          )
+                        }
+                        className="w-3.5 h-3.5 rounded accent-blue-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-mono text-slate-300 group-hover:text-white truncate">{field}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
+          {fieldSelectorState.mode !== 'all' && fieldSelectorState.mode !== 'none' && (
+            <p className="text-[10px] text-slate-500 font-mono">
+              {fieldSelectorState.mode === 'exclude'
+                ? `Excluding: ${[...fieldSelectorState.selected].join(', ')}`
+                : `Including only: ${[...fieldSelectorState.selected].join(', ')}`}
+            </p>
+          )}
+          {fieldSelectorState.mode === 'none' && (
+            <p className="text-[10px] text-slate-500 font-mono">No fields selected — no filter[fields] parameter added.</p>
+          )}
+        </div>
+      )}
 
       {createOpen && (
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
@@ -458,13 +813,35 @@ export default function ResourcePage() {
       </div>
 
       {queryInfoOpen && (
-        <div className="w-80 flex-shrink-0 border-l border-slate-700 bg-slate-900 flex flex-col overflow-hidden">
-          {/* Sidebar header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 flex-shrink-0">
-            <span className="text-sm font-semibold text-slate-200">Request Info</span>
+        <div
+          className="flex-shrink-0 border-l border-slate-700 bg-slate-900 flex flex-col overflow-hidden relative"
+          style={{ width: sidebarWidth }}
+        >
+          {/* Resize handle */}
+          <div
+            onMouseDown={handleResizeMouseDown}
+            className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/40 transition-colors z-10"
+            title="Drag to resize"
+          />
+
+          {/* Tabs + close button */}
+          <div className="flex items-center border-b border-slate-800 flex-shrink-0">
+            {['request', 'identity'].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setQueryInfoTab(tab)}
+                className={`flex-1 py-2 text-xs font-medium capitalize transition-colors ${
+                  queryInfoTab === tab
+                    ? 'text-blue-400 border-b-2 border-blue-500 -mb-px bg-slate-900'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
             <button
               onClick={() => setQueryInfoOpen(false)}
-              className="text-slate-500 hover:text-slate-300"
+              className="px-3 py-2 text-slate-500 hover:text-slate-300"
               aria-label="Close"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -475,6 +852,12 @@ export default function ResourcePage() {
 
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
 
+            {queryInfoTab === 'identity' && (
+              <IdentityTab token={token} />
+            )}
+
+            {queryInfoTab === 'request' && (
+            <>
             {/* ── REQUEST ── */}
             <div className="space-y-3">
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Request</p>
@@ -575,6 +958,9 @@ export default function ResourcePage() {
                   </div>
                 )}
               </div>
+            )}
+
+            </>
             )}
 
           </div>

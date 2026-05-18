@@ -143,6 +143,18 @@ export function parseOasSpec(spec) {
       const schemaProps = itemSchema?.properties ?? {}
       const hasValidityDates = '_validFromDateTime' in schemaProps || '_validUntilDateTime' in schemaProps
 
+      // Detect filter[fields] capability: filter param with deepObject style that has a `fields` property
+      const filterParam = collectionGetParams.find(
+        (p) => p?.name === 'filter' && p?.in === 'query' && p?.style === 'deepObject'
+      )
+      const hasFilterFields = !!(filterParam?.schema?.properties?.fields)
+
+      const hasFieldset = collectionGetParams.some((p) => p?.name === 'fieldset' && p?.in === 'query')
+      const hasFields = collectionGetParams.some((p) => p?.name === 'fields' && p?.in === 'query')
+
+      // Derive available field names from the response schema properties (all fields, including validity dates)
+      const availableFields = Object.keys(schemaProps)
+
       return ({
         id: slugify(t.tag),
         label: t.tag,
@@ -151,6 +163,10 @@ export function parseOasSpec(spec) {
       collectionMethods: ['get', 'post', 'patch', 'put', 'delete'].filter((m) => t.collectionMethods.has(m)),
         hasSearch,
         hasValidityDates,
+        hasFilterFields,
+        hasFieldset,
+        hasFields,
+        availableFields,
         itemPathTemplate: t.itemPathTemplate,
         itemMethods: ['get', 'put', 'patch', 'delete'].filter((m) => t.itemMethods.has(m)),
         children: t.traversals.map((tr) => ({

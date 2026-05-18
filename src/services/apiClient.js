@@ -26,7 +26,7 @@ export async function apiFetch(baseUrl, path, token, options = {}) {
 
   let res
   try {
-    res = await fetch(url, { ...options, headers })
+    res = await fetch(url, { cache: 'no-store', ...options, headers })
   } catch (err) {
     const netErr = new Error(
       `Network/CORS error while calling ${path}. Check API server reachability and CORS headers. (${err?.message ?? 'fetch failed'})`
@@ -76,7 +76,7 @@ export async function apiFetchWithMeta(baseUrl, path, token, options = {}) {
 
   let res
   try {
-    res = await fetch(url, { ...options, headers })
+    res = await fetch(url, { cache: 'no-store', ...options, headers })
   } catch (err) {
     const netErr = new Error(
       `Network/CORS error while calling ${path}. Check API server reachability and CORS headers. (${err?.message ?? 'fetch failed'})`
@@ -90,6 +90,7 @@ export async function apiFetchWithMeta(baseUrl, path, token, options = {}) {
     responseHeaders[key] = value
   })
   const status = res.status
+  const requestHeaders = headers
 
   if (!res.ok) {
     let body
@@ -104,7 +105,7 @@ export async function apiFetchWithMeta(baseUrl, path, token, options = {}) {
     throw e
   }
 
-  if (res.status === 204) return { data: null, headers: responseHeaders, status }
+  if (res.status === 204) return { data: null, headers: responseHeaders, status, requestHeaders }
 
   const ct = res.headers.get('content-type') ?? ''
   let data
@@ -119,7 +120,7 @@ export async function apiFetchWithMeta(baseUrl, path, token, options = {}) {
     }
   }
 
-  return { data, headers: responseHeaders, status }
+  return { data, headers: responseHeaders, status, requestHeaders }
 }
 
 /**
@@ -127,16 +128,27 @@ export async function apiFetchWithMeta(baseUrl, path, token, options = {}) {
  * endpoint and token from context.
  */
 export function useApiClient() {
-  const { endpoint, token } = useApp()
+  const { endpoint, token, bypassCache } = useApp()
+
+  // When bypassCache is false we still need a non-empty Cache-Control so the
+  // browser's fetch 'no-store' mode does NOT inject its own "Cache-Control:
+  // no-cache" (Fetch Standard step 7 only injects when the header is absent).
+  // "public" is a response-only directive; every HTTP cache ignores it in a
+  // request, so the gateway sees no bypass signal and serves from its cache.
+  const cacheHeaders = bypassCache
+    ? { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+    : { 'Cache-Control': 'public' }
 
   const get = useCallback(
-    (path) => apiFetch(endpoint, path, token),
-    [endpoint, token]
+    (path) => apiFetch(endpoint, path, token, { headers: cacheHeaders }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [endpoint, token, bypassCache]
   )
 
   const getWithMeta = useCallback(
-    (path) => apiFetchWithMeta(endpoint, path, token),
-    [endpoint, token]
+    (path) => apiFetchWithMeta(endpoint, path, token, { headers: cacheHeaders }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [endpoint, token, bypassCache]
   )
 
   const post = useCallback(
