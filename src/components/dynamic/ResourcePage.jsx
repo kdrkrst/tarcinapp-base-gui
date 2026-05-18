@@ -463,7 +463,10 @@ export default function ResourcePage() {
       setCreatePayload('{}')
       await refresh()
     } catch (err) {
-      setCreateError(err?.message ?? 'Create failed')
+      setCreateError({
+        message: err?.message ?? 'Create failed',
+        details: err?.body?.error?.details ?? [],
+      })
     } finally {
       setCreating(false)
     }
@@ -812,7 +815,18 @@ export default function ResourcePage() {
               Cancel
             </button>
           </div>
-          {createError && <p className="text-red-400 text-sm">{createError}</p>}
+          {createError && (
+            <div className="text-red-400 text-sm space-y-1">
+              <p>{createError.message}</p>
+              {createError.details?.length > 0 && (
+                <ul className="list-disc list-inside space-y-0.5 text-red-300">
+                  {createError.details.map((d, i) => (
+                    <li key={i}>{d.field ? `${d.field}: ${d.message}` : d.message}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       )}
 
