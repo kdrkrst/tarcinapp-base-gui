@@ -4,7 +4,7 @@ import { parseOasSpec } from '../../utils/oasParser'
 
 export default function TopBar({ onToggleSidebar }) {
   const location = useLocation()
-  const { oasSpec, endpoint, setEndpoint, serverOptions, token, bypassCache, setBypassCache } = useApp()
+  const { oasSpec, endpoint, setEndpoint, serverOptions, token, bypassCache, setBypassCache, retry } = useApp()
   const { navItems } = oasSpec ? parseOasSpec(oasSpec) : { navItems: [] }
 
   const endpointChoices =
@@ -83,6 +83,17 @@ export default function TopBar({ onToggleSidebar }) {
             <span className="text-xs text-slate-300">Authenticated</span>
           </div>
         )}
+
+        <button
+          onClick={retry}
+          title="Reload OAS spec from backend"
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span className="text-xs font-medium">Reload</span>
+        </button>
 
         <button
           onClick={() => setBypassCache(!bypassCache)}

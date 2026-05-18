@@ -80,9 +80,9 @@ export function AppProvider({ children }) {
     setOasStatus('loading')
     setOasError(null)
     try {
-      const headers = {}
+      const headers = { 'Cache-Control': 'no-cache' }
       if (tk) headers['Authorization'] = `Bearer ${tk}`
-      const res = await fetch(`${ep}/openapi.json`, { headers })
+      const res = await fetch(`${ep}/openapi.json`, { headers, cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`)
       const spec = await res.json()
       setOasSpec(spec)
