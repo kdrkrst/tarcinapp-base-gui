@@ -1,11 +1,24 @@
+import { useState, useRef, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useApp } from '../../context/AppContext'
 import { parseOasSpec } from '../../utils/oasParser'
 
 export default function TopBar({ onToggleSidebar }) {
   const location = useLocation()
-  const { oasSpec, endpoint, setEndpoint, serverOptions, token, bypassCache, setBypassCache, retry } = useApp()
+  const { oasSpec, endpoint, setEndpoint, serverOptions, token } = useApp()
   const { navItems } = oasSpec ? parseOasSpec(oasSpec) : { navItems: [] }
+
+  const [endpointOpen, setEndpointOpen] = useState(false)
+  const endpointRef = useRef(null)
+
+  useEffect(() => {
+    if (!endpointOpen) return
+    function handle(e) {
+      if (!endpointRef.current?.contains(e.target)) setEndpointOpen(false)
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [endpointOpen])
 
   const endpointChoices =
     serverOptions.length > 0
@@ -56,60 +69,41 @@ export default function TopBar({ onToggleSidebar }) {
         <h1 className="text-base font-semibold text-slate-100">{getTitle()}</h1>
       </div>
 
-      {/* Right: endpoint selector + auth indicator */}
-      <div className="flex items-center gap-3">
-        <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800 border border-slate-700">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-          <label htmlFor="endpoint-select" className="sr-only">Endpoint</label>
-          <select
-            id="endpoint-select"
-            value={endpoint ?? ''}
-            onChange={(e) => setEndpoint(e.target.value || null)}
-            className="bg-transparent text-xs text-slate-300 font-mono max-w-[280px] truncate focus:outline-none"
+      {/* Right: endpoint selector + action icons */}
+      <div className="flex items-center gap-2">
+        <div ref={endpointRef} className="relative hidden sm:block">
+          <button
+            onClick={() => setEndpointOpen((v) => !v)}
+            className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 transition-colors"
           >
-            {normalizedChoices.map((s) => (
-              <option key={s.url} value={s.url} className="bg-slate-900 text-slate-100">
-                {s.description ? `${s.description} - ${s.url}` : s.url}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {token && (
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700">
-            <svg className="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+            <span className="text-xs text-slate-300 max-w-[160px] truncate">
+              {normalizedChoices.find((s) => s.url === endpoint)?.description ?? endpoint ?? 'No endpoint'}
+            </span>
+            <svg className="w-3 h-3 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
             </svg>
-            <span className="text-xs text-slate-300">Authenticated</span>
-          </div>
-        )}
+          </button>
 
-        <button
-          onClick={retry}
-          title="Reload OAS spec from backend"
-          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          <span className="text-xs font-medium">Reload</span>
-        </button>
-
-        <button
-          onClick={() => setBypassCache(!bypassCache)}
-          title={bypassCache ? 'Cache bypass ON — click to enable cache' : 'Cache enabled — click to bypass cache'}
-          aria-pressed={bypassCache}
-          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md border transition-colors ${
-            bypassCache
-              ? 'bg-amber-900/40 border-amber-600/60 text-amber-400 hover:bg-amber-900/60'
-              : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-          }`}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 5.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
-          </svg>
-          <span className="text-xs font-medium">{bypassCache ? 'Cache OFF' : 'Cache ON'}</span>
-        </button>
+          {endpointOpen && (
+            <div className="absolute top-full right-0 mt-1 w-72 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
+              {normalizedChoices.map((s) => (
+                <button
+                  key={s.url}
+                  onClick={() => { setEndpoint(s.url); setEndpointOpen(false) }}
+                  className={`w-full text-left px-3 py-2.5 transition-colors hover:bg-slate-800 ${
+                    s.url === endpoint ? 'bg-slate-800/70' : ''
+                  }`}
+                >
+                  <div className="text-xs font-medium text-slate-200">{s.description ?? s.url}</div>
+                  {s.description && (
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">{s.url}</div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
 
       </div>

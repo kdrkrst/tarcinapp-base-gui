@@ -19,8 +19,9 @@ function AppShell() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<DashboardPage />} />
-        <Route path="/r/:tagSlug" element={<ResourcePage />} />
-        <Route path="/r/:tagSlug/item/:itemId" element={<ItemPage />} />
+        <Route path="/r/:tagSlug" element={<ResourcePage />}>
+          <Route path="item/:itemId" element={<ItemPage />} />
+        </Route>
         <Route path="/r/:tagSlug/:subResource" element={<TraversalPage />} />
       </Route>
     </Routes>

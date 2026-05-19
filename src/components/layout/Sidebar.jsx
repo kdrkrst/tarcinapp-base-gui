@@ -29,7 +29,7 @@ function NavIcon({ d, size = 'w-4 h-4' }) {
 }
 
 export default function Sidebar({ collapsed = false, onToggle }) {
-  const { oasSpec, disconnect } = useApp()
+  const { oasSpec, disconnect, retry, bypassCache, setBypassCache } = useApp()
   const { navItems } = oasSpec ? parseOasSpec(oasSpec) : { navItems: [] }
   const [expanded, setExpanded] = useState({})
 
@@ -153,19 +153,42 @@ export default function Sidebar({ collapsed = false, onToggle }) {
         })}
       </nav>
 
-      {/* Disconnect */}
-      <div className={`py-4 border-t border-slate-800 ${collapsed ? 'px-2' : 'px-4'}`}>
+      {/* Bottom actions */}
+      <div className={`py-3 border-t border-slate-800 ${collapsed ? 'flex flex-col items-center gap-1 px-2' : 'flex flex-row items-center gap-1 px-3'}`}>
         <button
-          onClick={disconnect}
-          title={collapsed ? 'Disconnect' : undefined}
-          className={`w-full flex items-center rounded-lg text-xs text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors ${
-            collapsed ? 'justify-center px-0 py-2' : 'gap-2 px-3 py-2'
+          onClick={retry}
+          title="Reload OAS spec"
+          aria-label="Reload OAS spec"
+          className="flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => setBypassCache(!bypassCache)}
+          title={bypassCache ? 'Cache bypass ON — click to enable cache' : 'Cache enabled — click to bypass'}
+          aria-pressed={bypassCache}
+          aria-label="Toggle cache"
+          className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+            bypassCache ? 'text-amber-400 hover:bg-slate-800' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
           }`}
         >
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 5.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+          </svg>
+        </button>
+
+        <button
+          onClick={disconnect}
+          title="Disconnect"
+          aria-label="Disconnect"
+          className={`flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors${collapsed ? '' : ' ml-auto'}`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
-          {!collapsed && 'Disconnect'}
         </button>
       </div>
     </aside>

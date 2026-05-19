@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, Outlet } from 'react-router-dom'
 import { useApp } from '../../context/AppContext'
 import { parseOasSpec, deriveColumns, resolvePaginationQueryKeys, getPostBodySchema } from '../../utils/oasParser'
 import { useApiClient } from '../../services/apiClient'
@@ -456,15 +456,15 @@ export default function ResourcePage() {
   const [createTab, setCreateTab] = useState('form')
   const [createFormValues, setCreateFormValues] = useState({})
   const [toastError, setToastError] = useState(null)
-  const [fieldSelectorOpen, setFieldSelectorOpen] = useState(false)
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
   // fieldSelectorState: { mode: 'all'|'exclude'|'none'|'include', selected: Set<string> }
   const [fieldSelectorState, setFieldSelectorState] = useState({ mode: 'all', selected: new Set() })
   const [selectedQ, setSelectedQ] = useState(null)
-  const [qDropdownOpen, setQDropdownOpen] = useState(false)
-  const qDropdownRef = useRef(null)
   const [queryInfoTab, setQueryInfoTab] = useState('request')
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [requestHeaders, setRequestHeaders] = useState(null)
+  const [qDropdownOpen, setQDropdownOpen] = useState(false)
+  const qDropdownRef = useRef(null)
   const isResizing = useRef(false)
   const resizeStartX = useRef(0)
   const resizeStartWidth = useRef(0)
@@ -533,8 +533,14 @@ export default function ResourcePage() {
     setDebouncedSearch('')
     setFieldSelectorState({ mode: 'all', selected: new Set() })
     setSelectedQ(null)
-    setQDropdownOpen(false)
   }, [navItem?.collectionPath, statusSelections, visibilitySelections])
+
+  useEffect(() => {
+    if (!qDropdownOpen) return undefined
+    const handler = (e) => { if (qDropdownRef.current && !qDropdownRef.current.contains(e.target)) setQDropdownOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [qDropdownOpen])
 
   useEffect(() => {
     if (!toastError) return undefined
@@ -547,17 +553,6 @@ export default function ResourcePage() {
       window.clearTimeout(timeoutId)
     }
   }, [toastError])
-
-  useEffect(() => {
-    if (!qDropdownOpen) return undefined
-    const handleClickOutside = (e) => {
-      if (qDropdownRef.current && !qDropdownRef.current.contains(e.target)) {
-        setQDropdownOpen(false)
-      }
-    }
-    window.addEventListener('mousedown', handleClickOutside)
-    return () => window.removeEventListener('mousedown', handleClickOutside)
-  }, [qDropdownOpen])
 
   useEffect(() => {
     if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current)
@@ -733,123 +728,15 @@ export default function ResourcePage() {
   }
 
   return (
+    <>
     <div className="flex -m-6 min-h-[calc(100vh-3.5rem)]">
       <div className="flex-1 p-6 min-w-0 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {showFieldSelector && (
-            <button
-              onClick={() => setFieldSelectorOpen((v) => !v)}
-              className={`flex items-center justify-center w-9 h-9 rounded-lg border ${
-                fieldSelectorOpen
-                  ? 'bg-blue-700 border-blue-500 text-white'
-                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
-              }`}
-              title="Select fields"
-              aria-label="Select fields"
-            >
-              {/* Columns icon — three vertical bars */}
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3" y="3" width="4" height="18" rx="1" strokeLinejoin="round" />
-                <rect x="10" y="3" width="4" height="18" rx="1" strokeLinejoin="round" />
-                <rect x="17" y="3" width="4" height="18" rx="1" strokeLinejoin="round" />
-              </svg>
-            </button>
-          )}
-
-          {qEnumValues && (
-            <div className="relative" ref={qDropdownRef}>
-              <button
-                onClick={() => setQDropdownOpen((v) => !v)}
-                className={`flex items-center gap-1.5 h-9 px-3 rounded-lg border text-xs font-medium transition-colors ${
-                  selectedQ
-                    ? 'bg-blue-700 border-blue-500 text-white'
-                    : qDropdownOpen
-                    ? 'bg-slate-700 border-slate-500 text-slate-200'
-                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
-                }`}
-                title="Predefined query (q)"
-                aria-label="Select predefined query"
-                aria-expanded={qDropdownOpen}
-              >
-                <span>Q</span>
-                {selectedQ && <span className="text-blue-200 font-mono">: {selectedQ}</span>}
-                <svg className={`w-3 h-3 transition-transform ${qDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {qDropdownOpen && (
-                <div className="absolute left-0 top-full mt-1 z-20 min-w-[10rem] rounded-xl border border-slate-700 bg-slate-900 shadow-xl py-1">
-                  {selectedQ && (
-                    <button
-                      onClick={() => { setSelectedQ(null); setQDropdownOpen(false); setPage(0) }}
-                      className="w-full text-left px-3 py-1.5 text-xs text-slate-500 hover:text-slate-200 hover:bg-slate-800 italic"
-                    >
-                      Clear selection
-                    </button>
-                  )}
-                  {qEnumValues.map((val) => (
-                    <button
-                      key={val}
-                      onClick={() => { setSelectedQ(val); setQDropdownOpen(false); setPage(0) }}
-                      className={`w-full text-left px-3 py-1.5 text-xs font-mono transition-colors ${
-                        selectedQ === val
-                          ? 'bg-blue-700/40 text-blue-300'
-                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                      }`}
-                    >
-                      {val}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {navItem.hasValidityDates && (
-            <div className="inline-flex rounded-xl border border-slate-700 bg-slate-900 p-1">
-              {STATUS_OPTIONS.map((option) => {
-                const selected = statusSelections.includes(option.key)
-                return (
-                  <button
-                    key={option.key}
-                    onClick={() => setStatusSelections((current) => toggleSelection(current, option.key))}
-                    className={`px-3 py-1.5 text-xs rounded-none first:rounded-l-lg last:rounded-r-lg transition-colors ${
-                      selected
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
-          <div className="inline-flex rounded-xl border border-slate-700 bg-slate-900 p-1">
-            {VISIBILITY_OPTIONS.map((option) => {
-              const selected = visibilitySelections.includes(option.key)
-              return (
-                <button
-                  key={option.key}
-                  onClick={() => setVisibilitySelections((current) => toggleSelection(current, option.key))}
-                  className={`px-3 py-1.5 text-xs rounded-none first:rounded-l-lg last:rounded-r-lg transition-colors ${
-                    selected
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
+      {/* ── Toolbar ── */}
+      <div className="flex items-center gap-3">
+        {/* Left: search */}
         {navItem.hasSearch && (
-          <div className="relative">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <div className="relative flex-1 max-w-xs">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
             </svg>
             <input
@@ -857,14 +744,10 @@ export default function ResourcePage() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search by name…"
-              className="pl-8 pr-3 py-2.5 text-xs rounded-xl bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-52"
+              className="w-full pl-8 pr-7 py-2 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
             {searchInput && (
-              <button
-                onClick={() => setSearchInput('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                aria-label="Clear search"
-              >
+              <button onClick={() => setSearchInput('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label="Clear search">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -873,165 +756,324 @@ export default function ResourcePage() {
           </div>
         )}
 
-        <div className="flex flex-col items-end gap-2 ml-auto">
-          <div className="flex items-center gap-2">
-            {canCreate && (
+        {/* Right: action buttons */}
+        <div className="ml-auto inline-flex rounded-lg border border-slate-700 divide-x divide-slate-700 overflow-hidden">
+          {/* Filter */}
+          {(() => {
+            const activeFilterCount = [
+              selectedQ !== null,
+              statusSelections.length > 0,
+              visibilitySelections.length > 0,
+              fieldSelectorState.mode !== 'all',
+            ].filter(Boolean).length
+            return (
               <button
-                onClick={() => {
-                  if (!createOpen) {
-                    setCreateFormValues({})
-                    setCreatePayload('{}')
-                    setCreateTab('form')
-                    setCreateError(null)
-                  }
-                  setCreateOpen((v) => !v)
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-blue-700 hover:bg-blue-600 border border-blue-600 text-white transition-colors"
+                onClick={() => setFilterPanelOpen((v) => !v)}
+                className={`relative flex items-center justify-center w-9 h-9 transition-colors ${
+                  filterPanelOpen || activeFilterCount > 0
+                    ? 'bg-blue-700 text-white'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white'
+                }`}
+                title="Filters"
+                aria-label="Filters"
               >
-                Add New
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M7 12h10M11 18h2" />
+                </svg>
+                {activeFilterCount > 0 && !filterPanelOpen && (
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-300" />
+                )}
               </button>
-            )}
+            )
+          })()}
 
+          {/* Add New */}
+          {canCreate && (
             <button
-              onClick={refresh}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              Refresh
-            </button>
-
-            <button
-              onClick={() => setQueryInfoOpen((v) => !v)}
-              className={`flex items-center justify-center w-9 h-9 rounded-lg border ${
-                queryInfoOpen
-                  ? 'bg-blue-700 border-blue-500 text-white'
-                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
-              }`}
-              title="Query info"
-              aria-label="Query info"
+              onClick={() => { if (!createOpen) { setCreateFormValues({}); setCreatePayload('{}'); setCreateTab('form'); setCreateError(null) } setCreateOpen((v) => !v) }}
+              className="flex items-center justify-center w-9 h-9 bg-slate-800 hover:bg-blue-700 text-slate-300 hover:text-white transition-colors"
+              title="Add New"
+              aria-label="Add New"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
             </button>
-          </div>
+          )}
+
+          {/* Refresh */}
+          <button
+            onClick={refresh}
+            className="flex items-center justify-center w-9 h-9 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+            title="Refresh"
+            aria-label="Refresh"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+
+          {/* Query info */}
+          <button
+            onClick={() => setQueryInfoOpen((v) => !v)}
+            className={`flex items-center justify-center w-9 h-9 transition-colors ${
+              queryInfoOpen ? 'bg-blue-700 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white'
+            }`}
+            title="Query info"
+            aria-label="Query info"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
         </div>
       </div>
 
-      {fieldSelectorOpen && showFieldSelector && (
-        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-3">
+      {/* ── Filter panel ── */}
+      {filterPanelOpen && (
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-4">
+
+          {/* Panel header */}
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-200">Select Fields</p>
-            <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-slate-200">Filters</p>
+            <div className="flex items-center gap-3">
+              {[selectedQ !== null, statusSelections.length > 0, visibilitySelections.length > 0, fieldSelectorState.mode !== 'all'].some(Boolean) && (
+                <button
+                  onClick={() => { setSelectedQ(null); setStatusSelections([]); setVisibilitySelections([]); setFieldSelectorState({ mode: 'all', selected: new Set() }); setPage(0) }}
+                  className="text-xs text-slate-400 hover:text-blue-400 transition-colors"
+                >
+                  Clear all
+                </button>
+              )}
               <button
-                onClick={() => setFieldSelectorState({ mode: 'all', selected: new Set() })}
-                className="text-xs text-slate-400 hover:text-slate-200 underline"
+                onClick={() => setFilterPanelOpen(false)}
+                className="flex items-center justify-center w-6 h-6 rounded text-slate-500 hover:text-white transition-colors"
+                aria-label="Close filters"
               >
-                Select all
-              </button>
-              <button
-                onClick={() => setFieldSelectorState({ mode: 'none', selected: new Set() })}
-                className="text-xs text-slate-400 hover:text-slate-200 underline"
-              >
-                Deselect all
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             </div>
           </div>
 
-          {/* Search within fields */}
-          <div className="relative">
-            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
-            </svg>
-            <input
-              type="text"
-              value={fieldSearch}
-              onChange={(e) => setFieldSearch(e.target.value)}
-              placeholder="Filter fields…"
-              className="w-full pl-7 pr-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            />
-            {fieldSearch && (
-              <button
-                onClick={() => setFieldSearch('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                aria-label="Clear field search"
-              >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
-          </div>
-
-          {availableFields.length === 0 ? (
-            <p className="text-xs text-slate-500">No fields found in schema or response.</p>
-          ) : (() => {
-            const filtered = fieldSearch
-              ? availableFields.filter((f) => f.toLowerCase().includes(fieldSearch.toLowerCase()))
-              : availableFields
-            return filtered.length === 0 ? (
-              <p className="text-xs text-slate-500">No fields match &ldquo;{fieldSearch}&rdquo;.</p>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-2">
-                {filtered.map((field) => {
-                  const checked = isFieldChecked(field, fieldSelectorState)
-                  return (
-                    <label key={field} className="flex items-center gap-2 cursor-pointer group">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() =>
-                          setFieldSelectorState((prev) =>
-                            toggleFieldSelection(field, availableFields, prev)
+          {/* Quick-filter row */}
+          <div className="flex flex-wrap gap-6">
+            {qEnumValues && (
+              <div className="space-y-1.5" ref={qDropdownRef}>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Query</p>
+                <div className="relative">
+                  <button
+                    onClick={() => setQDropdownOpen((v) => !v)}
+                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                  >
+                    <span className="truncate">
+                      {selectedQ
+                        ? <span className="text-blue-300">{selectedQ}</span>
+                        : <span className="text-slate-500">— none —</span>}
+                    </span>
+                    <svg className="w-3 h-3 ml-1.5 flex-shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                  {qDropdownOpen && (
+                    <div className="absolute left-0 top-full mt-1 z-20 min-w-[180px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                      <div className="max-h-48 overflow-y-auto">
+                        <button
+                          onClick={() => { setSelectedQ(null); setPage(0); setQDropdownOpen(false) }}
+                          className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${selectedQ === null ? 'bg-blue-700/40 text-blue-300' : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'}`}
+                        >
+                          — none —
+                        </button>
+                        {qEnumValues.map((val) => {
+                          const active = selectedQ === val
+                          return (
+                            <button
+                              key={val}
+                              onClick={() => { setSelectedQ(active ? null : val); setPage(0); setQDropdownOpen(false) }}
+                              className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${active ? 'bg-blue-700/40 text-blue-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+                            >
+                              {val}
+                            </button>
                           )
-                        }
-                        className="w-3.5 h-3.5 rounded accent-blue-500 cursor-pointer"
-                      />
-                      <span className="text-xs font-mono text-slate-300 group-hover:text-white truncate">{field}</span>
-                    </label>
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {navItem.hasValidityDates && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Status</p>
+                <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+                  {STATUS_OPTIONS.map((option) => {
+                    const selected = statusSelections.includes(option.key)
+                    return (
+                      <button
+                        key={option.key}
+                        onClick={() => setStatusSelections((cur) => toggleSelection(cur, option.key))}
+                        className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
+                          selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Visibility</p>
+              <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+                {VISIBILITY_OPTIONS.map((option) => {
+                  const selected = visibilitySelections.includes(option.key)
+                  return (
+                    <button
+                      key={option.key}
+                      onClick={() => setVisibilitySelections((cur) => toggleSelection(cur, option.key))}
+                      className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
+                        selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
                   )
                 })}
               </div>
-            )
-          })()}
+            </div>
+          </div>
 
-          {fieldSelectorState.mode !== 'all' && fieldSelectorState.mode !== 'none' && (
-            <p className="text-[10px] text-slate-500 font-mono">
-              {fieldSelectorState.mode === 'exclude'
-                ? `Excluding: ${[...fieldSelectorState.selected].join(', ')}`
-                : `Including only: ${[...fieldSelectorState.selected].join(', ')}`}
-            </p>
-          )}
-          {fieldSelectorState.mode === 'none' && (
-            <p className="text-[10px] text-slate-500 font-mono">No fields selected — no filter[fields] parameter added.</p>
+          {/* Column selector */}
+          {showFieldSelector && (
+            <>
+              <hr className="border-slate-700" />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Columns</p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setFieldSelectorState({ mode: 'all', selected: new Set() })} className="text-xs text-slate-400 hover:text-slate-200 underline">Select all</button>
+                    <button onClick={() => setFieldSelectorState({ mode: 'none', selected: new Set() })} className="text-xs text-slate-400 hover:text-slate-200 underline">Deselect all</button>
+                  </div>
+                </div>
+
+                {/* Search within fields */}
+                <div className="relative">
+                  <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={fieldSearch}
+                    onChange={(e) => setFieldSearch(e.target.value)}
+                    placeholder="Filter fields…"
+                    className="w-full pl-7 pr-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                  {fieldSearch && (
+                    <button onClick={() => setFieldSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label="Clear field search">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {availableFields.length === 0 ? (
+                  <p className="text-xs text-slate-500">No fields found in schema or response.</p>
+                ) : (() => {
+                  const filtered = fieldSearch
+                    ? availableFields.filter((f) => f.toLowerCase().includes(fieldSearch.toLowerCase()))
+                    : availableFields
+                  return filtered.length === 0 ? (
+                    <p className="text-xs text-slate-500">No fields match &ldquo;{fieldSearch}&rdquo;.</p>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-2">
+                      {filtered.map((field) => {
+                        const checked = isFieldChecked(field, fieldSelectorState)
+                        return (
+                          <label key={field} className="flex items-center gap-2 cursor-pointer group">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setFieldSelectorState((prev) => toggleFieldSelection(field, availableFields, prev))}
+                              className="w-3.5 h-3.5 rounded accent-blue-500 cursor-pointer"
+                            />
+                            <span className="text-xs font-mono text-slate-300 group-hover:text-white truncate">{field}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+
+                {fieldSelectorState.mode !== 'all' && fieldSelectorState.mode !== 'none' && (
+                  <p className="text-[10px] text-slate-500 font-mono">
+                    {fieldSelectorState.mode === 'exclude'
+                      ? `Excluding: ${[...fieldSelectorState.selected].join(', ')}`
+                      : `Including only: ${[...fieldSelectorState.selected].join(', ')}`}
+                  </p>
+                )}
+                {fieldSelectorState.mode === 'none' && (
+                  <p className="text-[10px] text-slate-500 font-mono">No fields selected — no filter[fields] parameter added.</p>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
 
       {createOpen && (
-        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-4">
-          {/* Header + tab switcher */}
-          <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setCreateOpen(false)}
+          />
+          {/* Modal panel */}
+          <div className="relative z-10 w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0">
             <p className="text-sm font-semibold text-slate-200">Create new item</p>
-            {writableFields.length > 0 && (
-              <div className="flex rounded-lg overflow-hidden border border-slate-700 text-xs">
-                <button
-                  onClick={() => handleCreateTabSwitch('form')}
-                  className={`px-3 py-1.5 transition-colors ${createTab === 'form' ? 'bg-blue-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                >
-                  Form
-                </button>
-                <button
-                  onClick={() => handleCreateTabSwitch('json')}
-                  className={`px-3 py-1.5 transition-colors border-l border-slate-700 ${createTab === 'json' ? 'bg-blue-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                >
-                  JSON
-                </button>
-              </div>
-            )}
+            <button
+              onClick={() => setCreateOpen(false)}
+              className="flex items-center justify-center w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-white transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
+
+          {/* Tab bar */}
+          {writableFields.length > 0 && (
+            <div className="flex border-b border-slate-700 px-4 shrink-0">
+              <button
+                onClick={() => handleCreateTabSwitch('form')}
+                className={`px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
+                  createTab === 'form'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Form
+              </button>
+              <button
+                onClick={() => handleCreateTabSwitch('json')}
+                className={`px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
+                  createTab === 'json'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                JSON
+              </button>
+            </div>
+          )}
+
+          {/* Content */}
+          <div className="p-4 space-y-4 overflow-y-auto">
 
           {/* Form tab */}
           {createTab === 'form' && writableFields.length > 0 && (
@@ -1122,6 +1164,8 @@ export default function ResourcePage() {
               )}
             </div>
           )}
+        </div>
+        </div>
         </div>
       )}
 
@@ -1345,5 +1389,7 @@ export default function ResourcePage() {
         </div>
       )}
     </div>
+    <Outlet />
+    </>
   )
 }
