@@ -45,7 +45,7 @@ export function AppProvider({ children }) {
 
   const [endpoint, setEndpointRaw] = useState(envEndpoint ?? stored.endpoint ?? null)
   const [token, setTokenRaw] = useState(envToken ?? stored.token ?? null)
-  const [bypassCache, setBypassCacheRaw] = useState(stored.bypassCache ?? false)
+  const [bypassCache, setBypassCacheRaw] = useState(stored.bypassCache ?? true)
   const [oasSpec, setOasSpec] = useState(null)
   // 'idle' | 'loading' | 'success' | 'error'
   const [oasStatus, setOasStatus] = useState('idle')

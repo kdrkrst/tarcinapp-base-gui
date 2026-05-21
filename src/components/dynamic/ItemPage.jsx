@@ -78,6 +78,36 @@ function FieldEditor({ currentValue, schema, onCommit, onCancel }) {
     )
   }
 
+  // Visibility (public / protected / private) → button group
+  const VISIBILITY_VALS = ['public', 'protected', 'private']
+  if (
+    enumVals?.length === VISIBILITY_VALS.length &&
+    VISIBILITY_VALS.every((v) => enumVals.includes(v))
+  ) {
+    const opts = [...enumVals, ...(nullable ? [null] : [])]
+    return (
+      <div>
+        <div className="inline-flex mt-1 rounded-lg border border-slate-700 overflow-hidden">
+          {opts.map((v) => (
+            <button
+              key={String(v)}
+              type="button"
+              onClick={() => setLocalVal(v)}
+              className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
+                localVal === v
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+              }`}
+            >
+              {v === null ? 'null' : String(v)}
+            </button>
+          ))}
+        </div>
+        <EditorActions onCommit={() => onCommit(localVal)} onCancel={onCancel} />
+      </div>
+    )
+  }
+
   // Enum
   if (enumVals?.length) {
     return (
@@ -208,7 +238,13 @@ const PencilIcon = () => (
   </svg>
 )
 
-function EditableFieldRow({ label, displayValue, schema, isEditing, isPending, canEdit, onEdit, onCommit, onCancel }) {
+const RevertIcon = () => (
+  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6M3 10l6-6" />
+  </svg>
+)
+
+function EditableFieldRow({ label, displayValue, schema, isEditing, isPending, canEdit, onEdit, onCommit, onCancel, onRevert }) {
   if (isEditing) {
     return (
       <div className="rounded-lg bg-slate-800/40 border border-slate-700/60 p-2.5">
@@ -227,16 +263,29 @@ function EditableFieldRow({ label, displayValue, schema, isEditing, isPending, c
     <div className="group">
       <div className="flex items-center justify-between mb-0.5">
         <p className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</p>
-        {canEdit && (
-          <button
-            type="button"
-            onClick={onEdit}
-            className="opacity-0 group-hover:opacity-100 flex items-center justify-center w-5 h-5 rounded text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-all"
-            aria-label={`Edit ${label}`}
-          >
-            <PencilIcon />
-          </button>
-        )}
+        <div className="flex items-center gap-0.5">
+          {isPending && onRevert && (
+            <button
+              type="button"
+              onClick={onRevert}
+              className="opacity-0 group-hover:opacity-100 flex items-center justify-center w-5 h-5 rounded text-amber-500 hover:text-amber-300 hover:bg-slate-700 transition-all"
+              aria-label={`Revert ${label}`}
+              title="Revert to original"
+            >
+              <RevertIcon />
+            </button>
+          )}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="opacity-0 group-hover:opacity-100 flex items-center justify-center w-5 h-5 rounded text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-all"
+              aria-label={`Edit ${label}`}
+            >
+              <PencilIcon />
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex items-center gap-1.5">
         {isPending && (
@@ -275,7 +324,7 @@ export default function ItemPage() {
   const { data, loading, error, refresh } = useResourceList(fetcher)
   const item = data[0] ?? {}
 
-  const [tab, setTab] = useState('view')
+  const [tab, setTab] = useState('fields')
   const [managedFieldsOpen, setManagedFieldsOpen] = useState(false)
   const [bodyText, setBodyText] = useState('{}')
   const [actionError, setActionError] = useState(null)
@@ -368,6 +417,14 @@ export default function ItemPage() {
     setEditingField(null)
   }
 
+  function revertEdit(key) {
+    setPendingEdits((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }
+
   if (!navItem || !itemPath) return null
 
   const hasEdit = navItem.itemMethods?.some((m) => ['patch', 'put', 'delete'].includes(m))
@@ -408,31 +465,31 @@ export default function ItemPage() {
 
           {/* Tab bar */}
           <div className="flex border-b border-slate-700 flex-shrink-0 px-5">
-            {['view', ...(hasEdit ? ['edit'] : [])].map((t) => (
+            {['fields', ...(hasEdit ? ['edit'] : [])].map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`py-2.5 px-1 mr-5 text-xs font-medium border-b-2 transition-colors capitalize ${
+                className={`py-2.5 px-1 mr-5 text-xs font-medium border-b-2 transition-colors ${
                   tab === t
                     ? 'border-blue-500 text-blue-400'
                     : 'border-transparent text-slate-500 hover:text-slate-300'
                 }`}
               >
-                {t === 'view' ? (
+                {t === 'fields' ? (
                   <span className="flex items-center gap-1.5">
-                    View
+                    Fields
                     {hasPendingEdits && (
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Unsaved changes" />
                     )}
                   </span>
-                ) : 'Edit'}
+                ) : 'JSON'}
               </button>
             ))}
           </div>
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            {tab === 'view' && (
+            {tab === 'fields' && (
               <>
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-slate-500 uppercase tracking-wide">Fields</span>
@@ -467,6 +524,7 @@ export default function ItemPage() {
                           onEdit={() => setEditingField('_name')}
                           onCommit={(v) => commitEdit('_name', v)}
                           onCancel={() => setEditingField(null)}
+                          onRevert={() => revertEdit('_name')}
                         />
                       )}
                       {[
@@ -486,6 +544,7 @@ export default function ItemPage() {
                           onEdit={() => setEditingField(key)}
                           onCommit={(v) => commitEdit(key, v)}
                           onCancel={() => setEditingField(null)}
+                          onRevert={() => revertEdit(key)}
                         />
                       ))}
                     </div>
@@ -521,6 +580,7 @@ export default function ItemPage() {
                                 onEdit={() => setEditingField(key)}
                                 onCommit={(v) => commitEdit(key, v)}
                                 onCancel={() => setEditingField(null)}
+                                onRevert={() => revertEdit(key)}
                               />
                             ))}
                         </div>
@@ -588,22 +648,13 @@ export default function ItemPage() {
           {/* Footer */}
           {tab === 'edit' && (
             <div className="flex items-center gap-2 px-5 py-3.5 border-t border-slate-700 flex-shrink-0">
-              {navItem.itemMethods.includes('patch') && (
-                <button
-                  onClick={() => runAction('patch')}
-                  disabled={acting}
-                  className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white"
-                >
-                  PATCH
-                </button>
-              )}
               {navItem.itemMethods.includes('put') && (
                 <button
                   onClick={() => runAction('put')}
                   disabled={acting}
                   className="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white"
                 >
-                  PUT
+                  Replace
                 </button>
               )}
               {navItem.itemMethods.includes('delete') && (
