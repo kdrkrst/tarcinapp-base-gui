@@ -233,6 +233,7 @@ export function parseOasSpec(spec) {
         qEnumValues,
         fieldsetEnumValues,
         availableFields,
+        itemSchemaProps: schemaProps,
         itemPathTemplate: t.itemPathTemplate,
         itemMethods: ['get', 'put', 'patch', 'delete'].filter((m) => t.itemMethods.has(m)),
         children: t.traversals.map((tr) => ({

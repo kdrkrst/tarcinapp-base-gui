@@ -10,6 +10,250 @@ function buildItemPath(template, id) {
   return template.replace(/\{[^}]+\}/, encodeURIComponent(id))
 }
 
+function formatValue(val) {
+  if (Array.isArray(val)) return val.length === 0 ? '\u2014' : val.join(', ')
+  if (val === null || val === undefined) return '\u2014'
+  if (typeof val === 'object') return JSON.stringify(val)
+  return String(val)
+}
+
+function EditorActions({ onCommit, onCancel }) {
+  return (
+    <div className="flex gap-2 mt-2">
+      <button
+        type="button"
+        onClick={onCommit}
+        className="px-2.5 py-1 text-xs rounded-md bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+      >
+        Apply
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="px-2.5 py-1 text-xs rounded-md border border-slate-600 text-slate-400 hover:text-slate-300 hover:border-slate-500 transition-colors"
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
+function FieldEditor({ currentValue, schema, onCommit, onCancel }) {
+  const rawType = schema?.type
+  const format = schema?.format
+  const enumVals = Array.isArray(schema?.enum) ? schema.enum : null
+  const nullable =
+    schema?.nullable === true ||
+    (Array.isArray(rawType) && rawType.includes('null'))
+  const actualType = Array.isArray(rawType)
+    ? rawType.find((t) => t !== 'null') ?? 'string'
+    : rawType ?? 'string'
+
+  const [localVal, setLocalVal] = useState(currentValue)
+  const [arrayInput, setArrayInput] = useState('')
+
+  // Boolean
+  if (actualType === 'boolean') {
+    const opts = [true, false, ...(nullable ? [null] : [])]
+    return (
+      <div>
+        <div className="flex gap-1.5 mt-1">
+          {opts.map((v) => (
+            <button
+              key={String(v)}
+              type="button"
+              onClick={() => setLocalVal(v)}
+              className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${
+                localVal === v
+                  ? 'bg-blue-600 border-blue-500 text-white'
+                  : 'border-slate-600 text-slate-400 hover:border-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {v === null ? 'null' : String(v)}
+            </button>
+          ))}
+        </div>
+        <EditorActions onCommit={() => onCommit(localVal)} onCancel={onCancel} />
+      </div>
+    )
+  }
+
+  // Enum
+  if (enumVals?.length) {
+    return (
+      <div>
+        <select
+          value={localVal ?? ''}
+          onChange={(e) => setLocalVal(e.target.value === '' ? null : e.target.value)}
+          className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-md px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          {nullable && <option value="">null</option>}
+          {enumVals.map((v) => (
+            <option key={v} value={v}>{v}</option>
+          ))}
+        </select>
+        <EditorActions onCommit={() => onCommit(localVal)} onCancel={onCancel} />
+      </div>
+    )
+  }
+
+  // Date-time
+  if (format === 'date-time') {
+    const toInput = (v) => (v ? String(v).slice(0, 16) : '')
+    const fromInput = (s) => (s ? new Date(s).toISOString() : null)
+    return (
+      <div>
+        <input
+          type="datetime-local"
+          value={toInput(localVal)}
+          onChange={(e) => setLocalVal(fromInput(e.target.value))}
+          className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-md px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        <EditorActions onCommit={() => onCommit(localVal)} onCancel={onCancel} />
+      </div>
+    )
+  }
+
+  // Number / Integer
+  if (actualType === 'integer' || actualType === 'number') {
+    return (
+      <div>
+        <input
+          type="number"
+          step={actualType === 'integer' ? 1 : 'any'}
+          value={localVal ?? ''}
+          onChange={(e) =>
+            setLocalVal(e.target.value === '' ? null : Number(e.target.value))
+          }
+          className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-md px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        <EditorActions onCommit={() => onCommit(localVal)} onCancel={onCancel} />
+      </div>
+    )
+  }
+
+  // Array
+  if (actualType === 'array') {
+    const arr = Array.isArray(localVal) ? localVal : []
+    const addItem = () => {
+      const trimmed = arrayInput.trim()
+      if (!trimmed) return
+      setLocalVal([...arr, trimmed])
+      setArrayInput('')
+    }
+    return (
+      <div className="mt-1">
+        <div className="flex flex-wrap gap-1.5 mb-2 min-h-[24px]">
+          {arr.length === 0 ? (
+            <span className="text-xs text-slate-500 italic">empty \u2014 add items below</span>
+          ) : (
+            arr.map((it, i) => (
+              <span
+                key={i}
+                className="flex items-center gap-1 px-2 py-0.5 bg-slate-700 rounded text-xs text-slate-200"
+              >
+                {String(it)}
+                <button
+                  type="button"
+                  onClick={() => setLocalVal(arr.filter((_, j) => j !== i))}
+                  className="text-slate-400 hover:text-red-400 transition-colors leading-none ml-0.5"
+                >
+                  \u00d7
+                </button>
+              </span>
+            ))
+          )}
+        </div>
+        <div className="flex gap-1.5">
+          <input
+            value={arrayInput}
+            onChange={(e) => setArrayInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); addItem() }
+            }}
+            placeholder="Type item and press Enter"
+            className="flex-1 bg-slate-800 border border-slate-600 rounded-md px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            onClick={addItem}
+            className="px-2 py-1 text-xs rounded-md bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+          >
+            Add
+          </button>
+        </div>
+        <EditorActions onCommit={() => onCommit(localVal)} onCancel={onCancel} />
+      </div>
+    )
+  }
+
+  // String / default
+  return (
+    <div>
+      <input
+        autoFocus
+        type="text"
+        value={localVal ?? ''}
+        onChange={(e) => setLocalVal(e.target.value)}
+        className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-md px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+      <EditorActions onCommit={() => onCommit(localVal)} onCancel={onCancel} />
+    </div>
+  )
+}
+
+const PencilIcon = () => (
+  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+  </svg>
+)
+
+function EditableFieldRow({ label, displayValue, schema, isEditing, isPending, canEdit, onEdit, onCommit, onCancel }) {
+  if (isEditing) {
+    return (
+      <div className="rounded-lg bg-slate-800/40 border border-slate-700/60 p-2.5">
+        <p className="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">{label}</p>
+        <FieldEditor
+          currentValue={displayValue}
+          schema={schema}
+          onCommit={onCommit}
+          onCancel={onCancel}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="group">
+      <div className="flex items-center justify-between mb-0.5">
+        <p className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</p>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="opacity-0 group-hover:opacity-100 flex items-center justify-center w-5 h-5 rounded text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-all"
+            aria-label={`Edit ${label}`}
+          >
+            <PencilIcon />
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5">
+        {isPending && (
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 mt-0.5" title="Unsaved change" />
+        )}
+        <p className={`text-sm break-all ${
+          isPending ? 'text-amber-200' :
+          (displayValue === null || displayValue === undefined) ? 'text-slate-500 italic' :
+          'text-slate-200'
+        }`}>
+          {formatValue(displayValue)}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export default function ItemPage() {
   const { tagSlug, itemId } = useParams()
   const navigate = useNavigate()
@@ -30,18 +274,41 @@ export default function ItemPage() {
 
   const { data, loading, error, refresh } = useResourceList(fetcher)
   const item = data[0] ?? {}
+
   const [tab, setTab] = useState('view')
+  const [managedFieldsOpen, setManagedFieldsOpen] = useState(false)
   const [bodyText, setBodyText] = useState('{}')
   const [actionError, setActionError] = useState(null)
   const [actionSuccess, setActionSuccess] = useState(null)
   const [acting, setActing] = useState(false)
   const [toastError, setToastError] = useState(null)
 
+  // Inline edit state
+  const [editingField, setEditingField] = useState(null)
+  const [pendingEdits, setPendingEdits] = useState({})
+  const [patchSaving, setPatchSaving] = useState(false)
+  const [patchError, setPatchError] = useState(null)
+  const [toastSuccess, setToastSuccess] = useState(null)
+
+  useEffect(() => {
+    if (data[0]) {
+      setBodyText(JSON.stringify(data[0], null, 2))
+      setPendingEdits({})
+      setEditingField(null)
+    }
+  }, [data])
+
   useEffect(() => {
     if (!toastError) return undefined
     const timeoutId = window.setTimeout(() => setToastError(null), 3500)
     return () => window.clearTimeout(timeoutId)
   }, [toastError])
+
+  useEffect(() => {
+    if (!toastSuccess) return undefined
+    const timeoutId = window.setTimeout(() => setToastSuccess(null), 3500)
+    return () => window.clearTimeout(timeoutId)
+  }, [toastSuccess])
 
   function close() {
     navigate(`/r/${tagSlug}`)
@@ -75,10 +342,39 @@ export default function ItemPage() {
     }
   }
 
+  async function handleInlinePatch() {
+    setPatchSaving(true)
+    setPatchError(null)
+    try {
+      await api.patch(itemPath, pendingEdits)
+      await refresh()
+      setPendingEdits({})
+      setEditingField(null)
+      setToastSuccess('Changes saved successfully')
+    } catch (err) {
+      const message = err?.message ?? 'Save failed'
+      setPatchError({
+        message,
+        details: err?.body?.error?.details ?? [],
+      })
+      setToastError(message)
+    } finally {
+      setPatchSaving(false)
+    }
+  }
+
+  function commitEdit(key, value) {
+    setPendingEdits((prev) => ({ ...prev, [key]: value }))
+    setEditingField(null)
+  }
+
   if (!navItem || !itemPath) return null
 
   const hasEdit = navItem.itemMethods?.some((m) => ['patch', 'put', 'delete'].includes(m))
+  const hasPatch = navItem.itemMethods?.includes('patch')
   const decodedId = decodeURIComponent(itemId ?? '')
+  const schemaProps = navItem.itemSchemaProps ?? {}
+  const hasPendingEdits = Object.keys(pendingEdits).length > 0
 
   return (
     <>
@@ -122,7 +418,14 @@ export default function ItemPage() {
                     : 'border-transparent text-slate-500 hover:text-slate-300'
                 }`}
               >
-                {t === 'view' ? 'View' : 'Edit'}
+                {t === 'view' ? (
+                  <span className="flex items-center gap-1.5">
+                    View
+                    {hasPendingEdits && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Unsaved changes" />
+                    )}
+                  </span>
+                ) : 'Edit'}
               </button>
             ))}
           </div>
@@ -144,56 +447,123 @@ export default function ItemPage() {
                     </svg>
                   </button>
                 </div>
+
                 {loading ? (
-                  <p className="text-slate-400 text-sm">Loading…</p>
+                  <p className="text-slate-400 text-sm">Loading\u2026</p>
                 ) : error ? (
                   <p className="text-red-400 text-sm">{error}</p>
                 ) : (
                   <>
-                    {/* Business fields: _name first, then non-underscore fields */}
+                    {/* Business fields */}
                     <div className="space-y-3">
-                      {'_name' in item && (
-                        <div>
-                          <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">Name</p>
-                          <p className="text-sm text-slate-200">{item._name ?? '—'}</p>
-                        </div>
+                      {('_name' in item || '_name' in schemaProps) && (
+                        <EditableFieldRow
+                          label="Name"
+                          displayValue={pendingEdits._name !== undefined ? pendingEdits._name : (item._name ?? null)}
+                          schema={schemaProps._name}
+                          isEditing={editingField === '_name'}
+                          isPending={'_name' in pendingEdits}
+                          canEdit={hasPatch}
+                          onEdit={() => setEditingField('_name')}
+                          onCommit={(v) => commitEdit('_name', v)}
+                          onCancel={() => setEditingField(null)}
+                        />
                       )}
-                      {Object.entries(item)
-                        .filter(([k]) => !k.startsWith('_'))
-                        .map(([key, val]) => (
-                          <div key={key}>
-                            <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">{key}</p>
-                            <p className="text-sm text-slate-200 break-all">
-                              {Array.isArray(val)
-                                ? val.length === 0 ? '—' : val.join(', ')
-                                : val === null || val === undefined ? '—'
-                                : typeof val === 'object' ? JSON.stringify(val)
-                                : String(val)}
-                            </p>
-                          </div>
-                        ))}
+                      {[
+                        ...new Set([
+                          ...Object.keys(item).filter((k) => !k.startsWith('_')),
+                          ...Object.keys(schemaProps).filter((k) => !k.startsWith('_')),
+                        ]),
+                      ].map((key) => (
+                        <EditableFieldRow
+                          key={key}
+                          label={key}
+                          displayValue={pendingEdits[key] !== undefined ? pendingEdits[key] : (key in item ? item[key] : null)}
+                          schema={schemaProps[key]}
+                          isEditing={editingField === key}
+                          isPending={key in pendingEdits}
+                          canEdit={hasPatch}
+                          onEdit={() => setEditingField(key)}
+                          onCommit={(v) => commitEdit(key, v)}
+                          onCancel={() => setEditingField(null)}
+                        />
+                      ))}
                     </div>
 
-                    {/* Separator */}
+                    {/* Managed fields */}
                     <div className="border-t border-slate-700 pt-3">
-                      <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-2">Managed fields</p>
-                      <div className="space-y-1.5">
-                        {Object.entries(item)
-                          .filter(([k]) => k.startsWith('_') && k !== '_name')
-                          .map(([key, val]) => (
-                            <div key={key} className="flex gap-3 items-baseline">
-                              <span className="text-[11px] text-slate-500 font-mono w-44 shrink-0">{key}</span>
-                              <span className="text-[11px] text-slate-300 break-all">
-                                {Array.isArray(val)
-                                  ? val.length === 0 ? '—' : val.join(', ')
-                                  : val === null || val === undefined ? '—'
-                                  : typeof val === 'object' ? JSON.stringify(val)
-                                  : String(val)}
-                              </span>
-                            </div>
-                          ))}
-                      </div>
+                      <button
+                        onClick={() => setManagedFieldsOpen((o) => !o)}
+                        className="flex items-center gap-1.5 mb-2 group cursor-pointer"
+                        aria-label={managedFieldsOpen ? 'Collapse managed fields' : 'Expand managed fields'}
+                      >
+                        <p className="text-[10px] text-slate-500 uppercase tracking-wide group-hover:text-slate-400 transition-colors">Managed fields</p>
+                        <svg
+                          className={`w-3 h-3 text-slate-600 group-hover:text-slate-400 transition-colors transition-transform ${managedFieldsOpen ? 'rotate-180' : ''}`}
+                          fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      {managedFieldsOpen && (
+                        <div className="space-y-2">
+                          {Object.entries(item)
+                            .filter(([k]) => k.startsWith('_') && k !== '_name')
+                            .map(([key, val]) => (
+                              <EditableFieldRow
+                                key={key}
+                                label={key}
+                                displayValue={pendingEdits[key] !== undefined ? pendingEdits[key] : val}
+                                schema={schemaProps[key]}
+                                isEditing={editingField === key}
+                                isPending={key in pendingEdits}
+                                canEdit={hasPatch}
+                                onEdit={() => setEditingField(key)}
+                                onCommit={(v) => commitEdit(key, v)}
+                                onCancel={() => setEditingField(null)}
+                              />
+                            ))}
+                        </div>
+                      )}
                     </div>
+
+                    {/* Inline PATCH save bar */}
+                    {hasPendingEdits && (
+                      <div className="border-t border-slate-700 pt-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleInlinePatch}
+                            disabled={patchSaving}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
+                          >
+                            {patchSaving
+                              ? 'Saving\u2026'
+                              : `Save ${Object.keys(pendingEdits).length} change${Object.keys(pendingEdits).length > 1 ? 's' : ''}`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setPendingEdits({}); setEditingField(null); setPatchError(null) }}
+                            disabled={patchSaving}
+                            className="px-3 py-1.5 text-xs rounded-lg border border-slate-600 text-slate-400 hover:text-slate-300 hover:border-slate-500 disabled:opacity-50 transition-colors"
+                          >
+                            Discard
+                          </button>
+                        </div>
+                        {patchError && (
+                          <div className="text-red-400 text-sm space-y-1">
+                            <p>{patchError.message}</p>
+                            {patchError.details?.length > 0 && (
+                              <ul className="list-disc list-inside space-y-0.5 text-red-300 text-xs">
+                                {patchError.details.map((d, i) => (
+                                  <li key={i}>{d.field ? `${d.field}: ${d.message}` : d.message}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
               </>
@@ -250,6 +620,7 @@ export default function ItemPage() {
         </div>
       </div>
 
+      <Toast message={toastSuccess} onClose={() => setToastSuccess(null)} type="success" />
       <Toast message={toastError} onClose={() => setToastError(null)} type="error" />
     </>
   )
