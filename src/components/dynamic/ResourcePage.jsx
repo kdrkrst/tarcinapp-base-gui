@@ -460,11 +460,14 @@ export default function ResourcePage() {
   // fieldSelectorState: { mode: 'all'|'exclude'|'none'|'include', selected: Set<string> }
   const [fieldSelectorState, setFieldSelectorState] = useState({ mode: 'all', selected: new Set() })
   const [selectedQ, setSelectedQ] = useState(null)
+  const [selectedFieldset, setSelectedFieldset] = useState(null)
   const [queryInfoTab, setQueryInfoTab] = useState('request')
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [requestHeaders, setRequestHeaders] = useState(null)
   const [qDropdownOpen, setQDropdownOpen] = useState(false)
+  const [fieldsetDropdownOpen, setFieldsetDropdownOpen] = useState(false)
   const qDropdownRef = useRef(null)
+  const fieldsetDropdownRef = useRef(null)
   const isResizing = useRef(false)
   const resizeStartX = useRef(0)
   const resizeStartWidth = useRef(0)
@@ -507,6 +510,7 @@ export default function ResourcePage() {
   const canDeleteItem = navItem?.itemPathTemplate && navItem?.itemMethods?.includes('delete')
   const showFieldSelector = !!(navItem?.hasFilterFields || navItem?.hasFieldset || navItem?.hasFields)
   const qEnumValues = navItem?.qEnumValues ?? null
+  const fieldsetEnumValues = navItem?.fieldsetEnumValues ?? null
   const [fieldSearch, setFieldSearch] = useState('')
 
   const paginationKeys = useMemo(
@@ -523,9 +527,10 @@ export default function ResourcePage() {
     buildSetQuery(qs, statusSelections, visibilitySelections)
     if (debouncedSearch) qs.set('s', debouncedSearch)
     if (selectedQ) qs.set('q', selectedQ)
+    if (selectedFieldset) qs.set('fieldset', selectedFieldset)
     buildFilterFieldsParams(qs, fieldSelectorState)
     return formatQueryPreview(qs)
-  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, fieldSelectorState])
+  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState])
 
   useEffect(() => {
     setPage(0)
@@ -533,6 +538,7 @@ export default function ResourcePage() {
     setDebouncedSearch('')
     setFieldSelectorState({ mode: 'all', selected: new Set() })
     setSelectedQ(null)
+    setSelectedFieldset(null)
   }, [navItem?.collectionPath, statusSelections, visibilitySelections])
 
   useEffect(() => {
@@ -541,6 +547,13 @@ export default function ResourcePage() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [qDropdownOpen])
+
+  useEffect(() => {
+    if (!fieldsetDropdownOpen) return undefined
+    const handler = (e) => { if (fieldsetDropdownRef.current && !fieldsetDropdownRef.current.contains(e.target)) setFieldsetDropdownOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [fieldsetDropdownOpen])
 
   useEffect(() => {
     if (!toastError) return undefined
@@ -572,6 +585,7 @@ export default function ResourcePage() {
     buildSetQuery(qs, statusSelections, visibilitySelections)
     if (debouncedSearch) qs.set('s', debouncedSearch)
     if (selectedQ) qs.set('q', selectedQ)
+    if (selectedFieldset) qs.set('fieldset', selectedFieldset)
     buildFilterFieldsParams(qs, fieldSelectorState)
 
     const start = performance.now()
@@ -581,7 +595,7 @@ export default function ResourcePage() {
     setResponseStatus(status)
     setRequestHeaders(reqHeaders ?? null)
     return data ?? []
-  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, fieldSelectorState])
+  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState])
 
   const { data, loading, error, refresh } = useResourceList(fetcher)
 
@@ -762,6 +776,7 @@ export default function ResourcePage() {
           {(() => {
             const activeFilterCount = [
               selectedQ !== null,
+              selectedFieldset !== null,
               statusSelections.length > 0,
               visibilitySelections.length > 0,
               fieldSelectorState.mode !== 'all',
@@ -837,9 +852,9 @@ export default function ResourcePage() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-200">Filters</p>
             <div className="flex items-center gap-3">
-              {[selectedQ !== null, statusSelections.length > 0, visibilitySelections.length > 0, fieldSelectorState.mode !== 'all'].some(Boolean) && (
+              {[selectedQ !== null, selectedFieldset !== null, statusSelections.length > 0, visibilitySelections.length > 0, fieldSelectorState.mode !== 'all'].some(Boolean) && (
                 <button
-                  onClick={() => { setSelectedQ(null); setStatusSelections([]); setVisibilitySelections([]); setFieldSelectorState({ mode: 'all', selected: new Set() }); setPage(0) }}
+                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setStatusSelections([]); setVisibilitySelections([]); setFieldSelectorState({ mode: 'all', selected: new Set() }); setPage(0) }}
                   className="text-xs text-slate-400 hover:text-blue-400 transition-colors"
                 >
                   Clear all
@@ -889,6 +904,49 @@ export default function ResourcePage() {
                             <button
                               key={val}
                               onClick={() => { setSelectedQ(active ? null : val); setPage(0); setQDropdownOpen(false) }}
+                              className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${active ? 'bg-blue-700/40 text-blue-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+                            >
+                              {val}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {fieldsetEnumValues && (
+              <div className="space-y-1.5" ref={fieldsetDropdownRef}>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Fieldset</p>
+                <div className="relative">
+                  <button
+                    onClick={() => setFieldsetDropdownOpen((v) => !v)}
+                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                  >
+                    <span className="truncate">
+                      {selectedFieldset
+                        ? <span className="text-blue-300">{selectedFieldset}</span>
+                        : <span className="text-slate-500">— none —</span>}
+                    </span>
+                    <svg className="w-3 h-3 ml-1.5 flex-shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                  {fieldsetDropdownOpen && (
+                    <div className="absolute left-0 top-full mt-1 z-20 min-w-[180px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                      <div className="max-h-48 overflow-y-auto">
+                        <button
+                          onClick={() => { setSelectedFieldset(null); setPage(0); setFieldsetDropdownOpen(false) }}
+                          className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${selectedFieldset === null ? 'bg-blue-700/40 text-blue-300' : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'}`}
+                        >
+                          — none —
+                        </button>
+                        {fieldsetEnumValues.map((val) => {
+                          const active = selectedFieldset === val
+                          return (
+                            <button
+                              key={val}
+                              onClick={() => { setSelectedFieldset(active ? null : val); setPage(0); setFieldsetDropdownOpen(false) }}
                               className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${active ? 'bg-blue-700/40 text-blue-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
                             >
                               {val}

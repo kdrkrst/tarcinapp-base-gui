@@ -208,6 +208,10 @@ export function parseOasSpec(spec) {
       const qParam = collectionGetParams.find((p) => p?.name === 'q' && p?.in === 'query')
       const qEnumValues = Array.isArray(qParam?.schema?.enum) ? qParam.schema.enum : null
 
+      // Detect fieldset parameter and its enum values
+      const fieldsetParam = collectionGetParams.find((p) => p?.name === 'fieldset' && p?.in === 'query')
+      const fieldsetEnumValues = Array.isArray(fieldsetParam?.schema?.enum) ? fieldsetParam.schema.enum : null
+
       // Derive available field names from the response schema properties (all fields, including validity dates)
       const availableFields = Object.keys(schemaProps)
 
@@ -227,6 +231,7 @@ export function parseOasSpec(spec) {
         hasFieldset,
         hasFields,
         qEnumValues,
+        fieldsetEnumValues,
         availableFields,
         itemPathTemplate: t.itemPathTemplate,
         itemMethods: ['get', 'put', 'patch', 'delete'].filter((m) => t.itemMethods.has(m)),
