@@ -201,7 +201,7 @@ function FieldRow({ fieldKey, meta, value }) {
   )
 }
 
-function ManagedFieldsPanel({ row, onEdit, onActivate, onDelete }) {
+function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete }) {
   const accessFields = []
   const otherFields = []
   const nonManagedFields = []
@@ -259,16 +259,32 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, onDelete }) {
         )}
       </div>
       <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-800/70">
-        {onActivate && (
-          <button
-            onClick={onActivate}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 hover:text-emerald-100 border border-emerald-700/50 hover:border-emerald-600 transition-colors"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Activate
-          </button>
+        {(onActivate || onDeactivate) && (
+          <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+            {onActivate && (
+              <button
+                onClick={onActivate}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 hover:text-emerald-100 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Activate
+              </button>
+            )}
+            {onActivate && onDeactivate && <span className="w-px bg-slate-700" />}
+            {onDeactivate && (
+              <button
+                onClick={onDeactivate}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-900/30 hover:bg-amber-800/50 text-amber-400 hover:text-amber-200 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+                Deactivate
+              </button>
+            )}
+          </div>
         )}
         {onEdit && (
           <button
@@ -340,7 +356,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -348,6 +364,8 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const [colTooltip, setColTooltip] = useState(null)
   const [expandedRowId, setExpandedRowId] = useState(null)
   const [pendingDeleteRow, setPendingDeleteRow] = useState(null)
+  const [pendingActivateRow, setPendingActivateRow] = useState(null)
+  const [pendingDeactivateRow, setPendingDeactivateRow] = useState(null)
   const scrollContainerRef = useRef(null)
   const [containerWidth, setContainerWidth] = useState(null)
 
@@ -472,7 +490,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                 {col.label}
               </th>
             ))}
-            <th className="w-10 px-2 py-3 sticky right-0 bg-slate-800/60" style={{ minWidth: Math.max(40, [onRowClick, onRowDelete, onRowActivate].filter(Boolean).length * 36) }} />
+            <th className="w-10 px-2 py-3 sticky right-0 bg-slate-800/60" style={{ minWidth: Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate].filter(Boolean).length * 36) }} />
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800">
@@ -541,19 +559,38 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       : String(row[col.key] ?? '—')}
                 </td>
               ))}
-              <td className="px-2 py-3 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800/40" style={{ minWidth: Math.max(40, [onRowClick, onRowDelete, onRowActivate].filter(Boolean).length * 36) }}>
+              <td className="px-2 py-3 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800/40" style={{ minWidth: Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate].filter(Boolean).length * 36) }}>
                 <div className="flex items-center justify-center gap-1">
-                {onRowActivate && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onRowActivate(row) }}
-                    className="p-1.5 rounded-lg text-slate-600 hover:text-emerald-400 hover:bg-emerald-900/30 transition-colors"
-                    title="Activate (set valid from now)"
-                    aria-label="Activate"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </button>
+                {(onRowActivate || onRowDeactivate) && (
+                  <div className="inline-flex rounded-md border border-slate-700 overflow-hidden">
+                    {onRowActivate && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setPendingActivateRow(row) }}
+                        className="p-1.5 text-slate-600 hover:text-emerald-400 hover:bg-emerald-900/30 transition-colors"
+                        title="Activate (set valid from now)"
+                        aria-label="Activate"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </button>
+                    )}
+                    {onRowActivate && onRowDeactivate && (
+                      <span className="w-px bg-slate-700 self-stretch" />
+                    )}
+                    {onRowDeactivate && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setPendingDeactivateRow(row) }}
+                        className="p-1.5 text-slate-600 hover:text-amber-400 hover:bg-amber-900/30 transition-colors"
+                        title="Deactivate (set valid until now)"
+                        aria-label="Deactivate"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 )}
                 {onRowClick && (
                   <button
@@ -589,7 +626,8 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                     <ManagedFieldsPanel
                       row={row}
                       onEdit={onRowClick ? () => onRowClick(row) : undefined}
-                      onActivate={onRowActivate ? () => onRowActivate(row) : undefined}
+                      onActivate={onRowActivate ? () => setPendingActivateRow(row) : undefined}
+                      onDeactivate={onRowDeactivate ? () => setPendingDeactivateRow(row) : undefined}
                       onDelete={onRowDelete ? () => setPendingDeleteRow(row) : undefined}
                     />
                   </div>
@@ -609,6 +647,24 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
         confirmLabel="Yes, delete"
         onConfirm={() => { onRowDelete(pendingDeleteRow); setPendingDeleteRow(null) }}
         onCancel={() => setPendingDeleteRow(null)}
+      />
+      <ConfirmDialog
+        open={pendingActivateRow !== null}
+        title="Activate record?"
+        message="This will set the valid-from date to now. You can undo this later by editing the field."
+        confirmLabel="Yes, activate"
+        confirmVariant="success"
+        onConfirm={() => { onRowActivate(pendingActivateRow); setPendingActivateRow(null) }}
+        onCancel={() => setPendingActivateRow(null)}
+      />
+      <ConfirmDialog
+        open={pendingDeactivateRow !== null}
+        title="Deactivate record?"
+        message="This will set the valid-until date to now, making the record inactive. You can undo this later by editing the field."
+        confirmLabel="Yes, deactivate"
+        confirmVariant="warning"
+        onConfirm={() => { onRowDeactivate(pendingDeactivateRow); setPendingDeactivateRow(null) }}
+        onCancel={() => setPendingDeactivateRow(null)}
       />
     </div>
   )

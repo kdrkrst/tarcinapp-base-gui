@@ -509,6 +509,7 @@ export default function ResourcePage() {
   const canCreate = navItem?.collectionMethods?.includes('post')
   const canDeleteItem = navItem?.itemPathTemplate && navItem?.itemMethods?.includes('delete')
   const canActivate = !!navItem?.itemSchemaProps?.['_validFromDateTime'] && !!navItem?.itemPathTemplate && navItem?.itemMethods?.includes('patch')
+  const canDeactivate = !!navItem?.itemSchemaProps?.['_validUntilDateTime'] && !!navItem?.itemPathTemplate && navItem?.itemMethods?.includes('patch')
   const showFieldSelector = !!(navItem?.hasFilterFields || navItem?.hasFieldset || navItem?.hasFields)
   const qEnumValues = navItem?.qEnumValues ?? null
   const fieldsetEnumValues = navItem?.fieldsetEnumValues ?? null
@@ -636,6 +637,21 @@ export default function ResourcePage() {
         await refresh()
       } catch (err) {
         setToastError(err?.message ?? 'Activate failed')
+      }
+    },
+    [patch, navItem?.itemPathTemplate, refresh]
+  )
+
+  const handleDeactivateRow = useCallback(
+    async (row) => {
+      try {
+        setToastError(null)
+        const id = row?._id ?? row?.id
+        if (!id || !navItem?.itemPathTemplate) return
+        await patch(buildItemPath(navItem.itemPathTemplate, id), { _validUntilDateTime: new Date().toISOString() })
+        await refresh()
+      } catch (err) {
+        setToastError(err?.message ?? 'Deactivate failed')
       }
     },
     [patch, navItem?.itemPathTemplate, refresh]
@@ -1254,6 +1270,7 @@ export default function ResourcePage() {
           hasValidityDates={navItem?.hasValidityDates}
           onRowDelete={canDeleteItem ? handleDeleteRow : undefined}
           onRowActivate={canActivate ? handleActivateRow : undefined}
+          onRowDeactivate={canDeactivate ? handleDeactivateRow : undefined}
         />
       </div>
 

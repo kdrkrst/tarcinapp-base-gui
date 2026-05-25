@@ -1,4 +1,10 @@
-export default function ConfirmDialog({ open, title, message, onConfirm, onCancel, confirmLabel = 'Delete', cancelLabel = 'Cancel' }) {
+const CONFIRM_VARIANTS = {
+  danger:  'bg-rose-700 hover:bg-rose-600',
+  success: 'bg-emerald-700 hover:bg-emerald-600',
+  warning: 'bg-amber-600 hover:bg-amber-500',
+}
+
+export default function ConfirmDialog({ open, title, message, onConfirm, onCancel, confirmLabel = 'Delete', cancelLabel = 'Cancel', confirmVariant = 'danger' }) {
   if (!open) return null
 
   return (
@@ -35,7 +41,7 @@ export default function ConfirmDialog({ open, title, message, onConfirm, onCance
             </button>
             <button
               onClick={onConfirm}
-              className="px-4 py-2 text-sm rounded-lg bg-rose-700 hover:bg-rose-600 text-white transition-colors"
+              className={`px-4 py-2 text-sm rounded-lg text-white transition-colors ${CONFIRM_VARIANTS[confirmVariant] ?? CONFIRM_VARIANTS.danger}`}
             >
               {confirmLabel}
             </button>

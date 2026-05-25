@@ -560,6 +560,9 @@ export default function ItemPage() {
   const [patchError, setPatchError] = useState(null)
   const [toastSuccess, setToastSuccess] = useState(null)
   const [activating, setActivating] = useState(false)
+  const [deactivating, setDeactivating] = useState(false)
+  const [pendingActivate, setPendingActivate] = useState(false)
+  const [pendingDeactivate, setPendingDeactivate] = useState(false)
 
   useEffect(() => {
     if (data[0]) {
@@ -647,6 +650,19 @@ export default function ItemPage() {
     }
   }
 
+  async function handleDeactivate() {
+    setDeactivating(true)
+    try {
+      await api.patch(itemPath, { _validUntilDateTime: new Date().toISOString() })
+      await refresh()
+      setToastSuccess('Deactivated successfully')
+    } catch (err) {
+      setToastError(err?.message ?? 'Deactivate failed')
+    } finally {
+      setDeactivating(false)
+    }
+  }
+
   function commitEdit(key, value) {
     setPendingEdits((prev) => ({ ...prev, [key]: value }))
     setEditingField(null)
@@ -666,6 +682,7 @@ export default function ItemPage() {
   const hasEdit = navItem.itemMethods?.some((m) => ['patch', 'put', 'delete'].includes(m))
   const hasPatch = navItem.itemMethods?.includes('patch')
   const canActivate = hasPatch && '_validFromDateTime' in schemaProps
+  const canDeactivate = hasPatch && '_validUntilDateTime' in schemaProps
   const decodedId = decodeURIComponent(itemId ?? '')
   const hasPendingEdits = Object.keys(pendingEdits).length > 0
 
@@ -730,18 +747,36 @@ export default function ItemPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-slate-500 uppercase tracking-wide">Fields</span>
                   <div className="flex items-center gap-1">
-                    {canActivate && (
-                      <button
-                        onClick={handleActivate}
-                        disabled={activating}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 hover:text-emerald-100 border border-emerald-700/50 disabled:opacity-50 transition-colors"
-                        title="Set valid from now"
-                      >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        {activating ? 'Activating…' : 'Activate'}
-                      </button>
+                    {(canActivate || canDeactivate) && (
+                      <div className="inline-flex rounded-md border border-slate-700 overflow-hidden">
+                        {canActivate && (
+                          <button
+                            onClick={() => setPendingActivate(true)}
+                            disabled={activating}
+                            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 hover:text-emerald-100 disabled:opacity-50 transition-colors"
+                            title="Set valid from now"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {activating ? 'Activating…' : 'Activate'}
+                          </button>
+                        )}
+                        {canActivate && canDeactivate && <span className="w-px bg-slate-700" />}
+                        {canDeactivate && (
+                          <button
+                            onClick={() => setPendingDeactivate(true)}
+                            disabled={deactivating}
+                            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-amber-900/30 hover:bg-amber-800/50 text-amber-400 hover:text-amber-200 disabled:opacity-50 transition-colors"
+                            title="Set valid until now"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                            {deactivating ? 'Deactivating…' : 'Deactivate'}
+                          </button>
+                        )}
+                      </div>
                     )}
                     <button
                       onClick={refresh}
@@ -934,6 +969,24 @@ export default function ItemPage() {
         confirmLabel="Yes, delete"
         onConfirm={() => { setConfirmDelete(false); runAction('delete') }}
         onCancel={() => setConfirmDelete(false)}
+      />
+      <ConfirmDialog
+        open={pendingActivate}
+        title="Activate this record?"
+        message="This will set the valid-from date to now. You can undo this later by editing the field."
+        confirmLabel="Yes, activate"
+        confirmVariant="success"
+        onConfirm={() => { setPendingActivate(false); handleActivate() }}
+        onCancel={() => setPendingActivate(false)}
+      />
+      <ConfirmDialog
+        open={pendingDeactivate}
+        title="Deactivate this record?"
+        message="This will set the valid-until date to now, making the record inactive. You can undo this later by editing the field."
+        confirmLabel="Yes, deactivate"
+        confirmVariant="warning"
+        onConfirm={() => { setPendingDeactivate(false); handleDeactivate() }}
+        onCancel={() => setPendingDeactivate(false)}
       />
     </>
   )
