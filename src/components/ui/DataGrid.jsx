@@ -200,7 +200,7 @@ function FieldRow({ fieldKey, meta, value }) {
   )
 }
 
-function ManagedFieldsPanel({ row, onEdit, onCollapse }) {
+function ManagedFieldsPanel({ row, onEdit, onCollapse, onActivate, onDelete }) {
   const accessFields = []
   const otherFields = []
   const nonManagedFields = []
@@ -258,6 +258,17 @@ function ManagedFieldsPanel({ row, onEdit, onCollapse }) {
         )}
       </div>
       <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-800/70">
+        {onActivate && (
+          <button
+            onClick={onActivate}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 hover:text-emerald-100 border border-emerald-700/50 hover:border-emerald-600 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Activate
+          </button>
+        )}
         {onEdit && (
           <button
             onClick={onEdit}
@@ -278,6 +289,17 @@ function ManagedFieldsPanel({ row, onEdit, onCollapse }) {
           </svg>
           Collapse
         </button>
+        {onDelete && (
+          <button
+            onClick={onDelete}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-900/30 hover:bg-rose-800/50 text-rose-400 hover:text-rose-200 border border-rose-800/50 hover:border-rose-700 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+            </svg>
+            Delete
+          </button>
+        )}
       </div>
     </div>
   )
@@ -326,7 +348,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -457,7 +479,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                 {col.label}
               </th>
             ))}
-            <th className="w-10 px-2 py-3 sticky right-0 bg-slate-800/60" style={{ minWidth: (onRowClick && onRowDelete) ? 80 : 40 }} />
+            <th className="w-10 px-2 py-3 sticky right-0 bg-slate-800/60" style={{ minWidth: Math.max(40, [onRowClick, onRowDelete, onRowActivate].filter(Boolean).length * 36) }} />
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800">
@@ -526,8 +548,20 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       : String(row[col.key] ?? '—')}
                 </td>
               ))}
-              <td className="px-2 py-3 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800/40" style={{ minWidth: (onRowClick && onRowDelete) ? 80 : 40 }}>
+              <td className="px-2 py-3 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800/40" style={{ minWidth: Math.max(40, [onRowClick, onRowDelete, onRowActivate].filter(Boolean).length * 36) }}>
                 <div className="flex items-center justify-center gap-1">
+                {onRowActivate && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onRowActivate(row) }}
+                    className="p-1.5 rounded-lg text-slate-600 hover:text-emerald-400 hover:bg-emerald-900/30 transition-colors"
+                    title="Activate (set valid from now)"
+                    aria-label="Activate"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                )}
                 {onRowClick && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onRowClick(row) }}
@@ -562,6 +596,8 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                     <ManagedFieldsPanel
                       row={row}
                       onEdit={onRowClick ? () => onRowClick(row) : undefined}
+                      onActivate={onRowActivate ? () => onRowActivate(row) : undefined}
+                      onDelete={onRowDelete ? () => onRowDelete(row) : undefined}
                       onCollapse={() => setExpandedRowId(null)}
                     />
                   </div>

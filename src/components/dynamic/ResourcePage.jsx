@@ -435,7 +435,7 @@ export default function ResourcePage() {
   const { tagSlug } = useParams()
   const navigate = useNavigate()
   const { oasSpec, endpoint, token } = useApp()
-  const { get, getWithMeta, post, del } = useApiClient()
+  const { get, getWithMeta, post, patch, del } = useApiClient()
   const [statusSelections, setStatusSelections] = useState([])
   const [visibilitySelections, setVisibilitySelections] = useState([])
   const [page, setPage] = useState(0)
@@ -508,6 +508,7 @@ export default function ResourcePage() {
 
   const canCreate = navItem?.collectionMethods?.includes('post')
   const canDeleteItem = navItem?.itemPathTemplate && navItem?.itemMethods?.includes('delete')
+  const canActivate = !!navItem?.itemSchemaProps?.['_validFromDateTime'] && !!navItem?.itemPathTemplate && navItem?.itemMethods?.includes('patch')
   const showFieldSelector = !!(navItem?.hasFilterFields || navItem?.hasFieldset || navItem?.hasFields)
   const qEnumValues = navItem?.qEnumValues ?? null
   const fieldsetEnumValues = navItem?.fieldsetEnumValues ?? null
@@ -623,6 +624,21 @@ export default function ResourcePage() {
       }
     },
     [del, navItem?.itemPathTemplate, refresh]
+  )
+
+  const handleActivateRow = useCallback(
+    async (row) => {
+      try {
+        setToastError(null)
+        const id = row?._id ?? row?.id
+        if (!id || !navItem?.itemPathTemplate) return
+        await patch(buildItemPath(navItem.itemPathTemplate, id), { _validFromDateTime: new Date().toISOString() })
+        await refresh()
+      } catch (err) {
+        setToastError(err?.message ?? 'Activate failed')
+      }
+    },
+    [patch, navItem?.itemPathTemplate, refresh]
   )
 
   const columns = useMemo(() => {
@@ -1237,6 +1253,7 @@ export default function ResourcePage() {
           onRowClick={navItem?.itemPathTemplate ? handleRowClick : undefined}
           hasValidityDates={navItem?.hasValidityDates}
           onRowDelete={canDeleteItem ? handleDeleteRow : undefined}
+          onRowActivate={canActivate ? handleActivateRow : undefined}
         />
       </div>
 

@@ -557,6 +557,7 @@ export default function ItemPage() {
   const [patchSaving, setPatchSaving] = useState(false)
   const [patchError, setPatchError] = useState(null)
   const [toastSuccess, setToastSuccess] = useState(null)
+  const [activating, setActivating] = useState(false)
 
   useEffect(() => {
     if (data[0]) {
@@ -631,6 +632,19 @@ export default function ItemPage() {
     }
   }
 
+  async function handleActivate() {
+    setActivating(true)
+    try {
+      await api.patch(itemPath, { _validFromDateTime: new Date().toISOString() })
+      await refresh()
+      setToastSuccess('Activated successfully')
+    } catch (err) {
+      setToastError(err?.message ?? 'Activate failed')
+    } finally {
+      setActivating(false)
+    }
+  }
+
   function commitEdit(key, value) {
     setPendingEdits((prev) => ({ ...prev, [key]: value }))
     setEditingField(null)
@@ -648,6 +662,7 @@ export default function ItemPage() {
 
   const hasEdit = navItem.itemMethods?.some((m) => ['patch', 'put', 'delete'].includes(m))
   const hasPatch = navItem.itemMethods?.includes('patch')
+  const canActivate = hasPatch && '_validFromDateTime' in schemaProps
   const decodedId = decodeURIComponent(itemId ?? '')
   const schemaProps = navItem.itemSchemaProps ?? {}
   const hasPendingEdits = Object.keys(pendingEdits).length > 0
@@ -712,16 +727,31 @@ export default function ItemPage() {
               <>
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-slate-500 uppercase tracking-wide">Fields</span>
-                  <button
-                    onClick={refresh}
-                    className="flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
-                    title="Refresh"
-                    aria-label="Refresh"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {canActivate && (
+                      <button
+                        onClick={handleActivate}
+                        disabled={activating}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 hover:text-emerald-100 border border-emerald-700/50 disabled:opacity-50 transition-colors"
+                        title="Set valid from now"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {activating ? 'Activating…' : 'Activate'}
+                      </button>
+                    )}
+                    <button
+                      onClick={refresh}
+                      className="flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                      title="Refresh"
+                      aria-label="Refresh"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
 
                 {loading ? (
