@@ -234,6 +234,7 @@ export function parseOasSpec(spec) {
         fieldsetEnumValues,
         availableFields,
         itemSchemaProps: schemaProps,
+        itemAllowsAdditionalProps: itemSchema != null && itemSchema.additionalProperties !== false,
         itemPathTemplate: t.itemPathTemplate,
         itemMethods: ['get', 'put', 'patch', 'delete'].filter((m) => t.itemMethods.has(m)),
         children: t.traversals.map((tr) => ({

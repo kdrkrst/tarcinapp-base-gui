@@ -200,9 +200,17 @@ function FieldRow({ fieldKey, meta, value }) {
   )
 }
 
-function ManagedFieldsPanel({ row }) {
+function ManagedFieldsPanel({ row, onEdit, onCollapse }) {
   const accessFields = []
   const otherFields = []
+  const nonManagedFields = []
+
+  // Collect non-managed fields (not starting with _)
+  for (const key of Object.keys(row)) {
+    if (!key.startsWith('_')) {
+      nonManagedFields.push({ key, meta: null, value: row[key] })
+    }
+  }
 
   for (const key of MANAGED_FIELD_ORDER) {
     if (EXCLUDE_FROM_PANEL.has(key)) continue
@@ -219,26 +227,58 @@ function ManagedFieldsPanel({ row }) {
     }
   }
 
-  if (accessFields.length === 0 && otherFields.length === 0) return null
+  if (nonManagedFields.length === 0 && accessFields.length === 0 && otherFields.length === 0) return null
 
   return (
-    <div className="bg-slate-950/60 border-t border-slate-700/40 px-4 py-2.5 flex gap-6" style={{ maxWidth: 860 }}>
-      {otherFields.length > 0 && (
-        <div className="min-w-0" style={{ width: 440 }}>
-          <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Record</p>
-          {otherFields.map(({ key, meta, value }) => (
-            <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-          ))}
-        </div>
-      )}
-      {accessFields.length > 0 && (
-        <div className="w-72 flex-shrink-0">
-          <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Access & Visibility</p>
-          {accessFields.map(({ key, meta, value }) => (
-            <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-          ))}
-        </div>
-      )}
+    <div className="bg-slate-950/60 border-t border-slate-700/40 px-4 py-2.5">
+      <div className="flex gap-6 flex-wrap">
+        {nonManagedFields.length > 0 && (
+          <div className="min-w-0" style={{ width: 280 }}>
+            <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Fields</p>
+            {nonManagedFields.map(({ key, meta, value }) => (
+              <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+            ))}
+          </div>
+        )}
+        {otherFields.length > 0 && (
+          <div className="min-w-0" style={{ width: 440 }}>
+            <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Record</p>
+            {otherFields.map(({ key, meta, value }) => (
+              <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+            ))}
+          </div>
+        )}
+        {accessFields.length > 0 && (
+          <div className="w-72 flex-shrink-0">
+            <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Access & Visibility</p>
+            {accessFields.map(({ key, meta, value }) => (
+              <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-800/70">
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 hover:border-slate-600 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+            </svg>
+            Edit
+          </button>
+        )}
+        <button
+          onClick={onCollapse}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-300 hover:bg-slate-800/60 border border-transparent hover:border-slate-700 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" />
+          </svg>
+          Collapse
+        </button>
+      </div>
     </div>
   )
 }
@@ -417,7 +457,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                 {col.label}
               </th>
             ))}
-            <th className="w-10 px-2 py-3 sticky right-0 bg-slate-800/60" style={{ minWidth: onRowDelete ? 80 : 40 }} />
+            <th className="w-10 px-2 py-3 sticky right-0 bg-slate-800/60" style={{ minWidth: (onRowClick && onRowDelete) ? 80 : 40 }} />
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800">
@@ -428,8 +468,8 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
             return (
             <Fragment key={rowId}>
             <tr
-              className={`group transition-colors ${onRowClick ? 'hover:bg-slate-800/40 cursor-pointer' : 'hover:bg-slate-800/40'}`}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              className="group transition-colors hover:bg-slate-800/40 cursor-pointer"
+              onClick={() => setExpandedRowId(isExpanded ? null : rowId)}
             >
               {columns.map((col, colIdx) => (
                 <td
@@ -486,26 +526,20 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       : String(row[col.key] ?? '—')}
                 </td>
               ))}
-              <td className="px-2 py-3 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800/40" style={{ minWidth: onRowDelete ? 80 : 40 }}>
+              <td className="px-2 py-3 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800/40" style={{ minWidth: (onRowClick && onRowDelete) ? 80 : 40 }}>
                 <div className="flex items-center justify-center gap-1">
-                <button
-                  onClick={(e) => { e.stopPropagation(); setExpandedRowId(isExpanded ? null : rowId) }}
-                  className={`p-1.5 rounded-lg transition-colors ${
-                    isExpanded
-                      ? 'text-blue-400 bg-slate-700/60'
-                      : 'text-slate-600 hover:text-blue-400 hover:bg-slate-700/60'
-                  }`}
-                  title={isExpanded ? 'Collapse managed fields' : 'View managed fields'}
-                  aria-label={isExpanded ? 'Collapse managed fields' : 'View managed fields'}
-                  aria-expanded={isExpanded}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-                    {isExpanded
-                      ? <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" />
-                      : <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-                    }
-                  </svg>
-                </button>
+                {onRowClick && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onRowClick(row) }}
+                    className="p-1.5 rounded-lg text-slate-600 hover:text-sky-400 hover:bg-sky-900/30 transition-colors"
+                    title="Edit record"
+                    aria-label="Edit record"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                    </svg>
+                  </button>
+                )}
                 {onRowDelete && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onRowDelete(row) }}
@@ -525,7 +559,11 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
               <tr className="border-b border-slate-700">
                 <td colSpan={columns.length + 1} className="p-0">
                   <div style={{ position: 'sticky', left: 0, width: containerWidth ?? '100%' }}>
-                    <ManagedFieldsPanel row={row} />
+                    <ManagedFieldsPanel
+                      row={row}
+                      onEdit={onRowClick ? () => onRowClick(row) : undefined}
+                      onCollapse={() => setExpandedRowId(null)}
+                    />
                   </div>
                 </td>
               </tr>

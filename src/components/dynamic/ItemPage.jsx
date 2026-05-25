@@ -244,6 +244,225 @@ const RevertIcon = () => (
   </svg>
 )
 
+const ADD_FIELD_TYPES = [
+  { key: 'string', label: 'String' },
+  { key: 'number', label: 'Number' },
+  { key: 'boolean', label: 'Boolean' },
+  { key: 'array', label: 'Array' },
+  { key: 'object', label: 'Object' },
+  { key: 'null', label: 'Null' },
+]
+
+function AddFieldRow({ onAdd }) {
+  const [open, setOpen] = useState(false)
+  const [fieldName, setFieldName] = useState('')
+  const [fieldType, setFieldType] = useState('string')
+  const [stringVal, setStringVal] = useState('')
+  const [numberVal, setNumberVal] = useState('')
+  const [boolVal, setBoolVal] = useState(true)
+  const [arrayItems, setArrayItems] = useState([])
+  const [arrayInput, setArrayInput] = useState('')
+  const [objectVal, setObjectVal] = useState('{}')
+
+  function reset() {
+    setFieldName('')
+    setFieldType('string')
+    setStringVal('')
+    setNumberVal('')
+    setBoolVal(true)
+    setArrayItems([])
+    setArrayInput('')
+    setObjectVal('{}')
+  }
+
+  function getValue() {
+    switch (fieldType) {
+      case 'number': return numberVal === '' ? 0 : Number(numberVal)
+      case 'boolean': return boolVal
+      case 'array': return arrayItems
+      case 'object': try { return JSON.parse(objectVal) } catch { return objectVal }
+      case 'null': return null
+      default: return stringVal
+    }
+  }
+
+  function handleConfirm() {
+    const name = fieldName.trim()
+    if (!name) return
+    onAdd(name, getValue())
+    reset()
+  }
+
+  const addArrayItem = () => {
+    const trimmed = arrayInput.trim()
+    if (!trimmed) return
+    setArrayItems((prev) => [...prev, trimmed])
+    setArrayInput('')
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1 mt-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+        </svg>
+        Add field
+      </button>
+    )
+  }
+
+  return (
+    <div className="rounded-lg bg-slate-800/40 border border-dashed border-slate-600 p-3 space-y-2.5">
+      <div>
+        <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Field name</p>
+        <input
+          autoFocus
+          type="text"
+          value={fieldName}
+          onChange={(e) => setFieldName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleConfirm() }}
+          placeholder="e.g. rating"
+          className="w-full bg-slate-800 border border-slate-600 rounded-md px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+
+      <div>
+        <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Type</p>
+        <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+          {ADD_FIELD_TYPES.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFieldType(key)}
+              className={`px-2.5 py-1 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
+                fieldType === key
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {fieldType === 'string' && (
+        <div>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Value</p>
+          <input
+            type="text"
+            value={stringVal}
+            onChange={(e) => setStringVal(e.target.value)}
+            className="w-full bg-slate-800 border border-slate-600 rounded-md px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+      )}
+      {fieldType === 'number' && (
+        <div>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Value</p>
+          <input
+            type="number"
+            step="any"
+            value={numberVal}
+            onChange={(e) => setNumberVal(e.target.value)}
+            className="w-full bg-slate-800 border border-slate-600 rounded-md px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+      )}
+      {fieldType === 'boolean' && (
+        <div>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Value</p>
+          <div className="flex gap-1.5">
+            {[true, false].map((v) => (
+              <button
+                key={String(v)}
+                type="button"
+                onClick={() => setBoolVal(v)}
+                className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${
+                  boolVal === v
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'border-slate-600 text-slate-400 hover:border-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {String(v)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {fieldType === 'array' && (
+        <div>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Items</p>
+          <div className="flex flex-wrap gap-1.5 mb-2 min-h-[24px]">
+            {arrayItems.length === 0 ? (
+              <span className="text-xs text-slate-500 italic">No items yet</span>
+            ) : (
+              arrayItems.map((it, i) => (
+                <span key={i} className="flex items-center gap-1 px-2 py-0.5 bg-slate-700 rounded text-xs text-slate-200">
+                  {String(it)}
+                  <button
+                    type="button"
+                    onClick={() => setArrayItems((prev) => prev.filter((_, j) => j !== i))}
+                    className="text-slate-400 hover:text-red-400 transition-colors leading-none"
+                  >
+                    &times;
+                  </button>
+                </span>
+              ))
+            )}
+          </div>
+          <div className="flex gap-1.5">
+            <input
+              value={arrayInput}
+              onChange={(e) => setArrayInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addArrayItem() } }}
+              placeholder="Type item and press Enter"
+              className="flex-1 bg-slate-800 border border-slate-600 rounded-md px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <button type="button" onClick={addArrayItem} className="px-2 py-1 text-xs rounded-md bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">Add</button>
+          </div>
+        </div>
+      )}
+      {fieldType === 'object' && (
+        <div>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Value (JSON)</p>
+          <textarea
+            value={objectVal}
+            onChange={(e) => setObjectVal(e.target.value)}
+            rows={3}
+            className="w-full bg-slate-800 border border-slate-600 rounded-md px-2 py-1.5 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+      )}
+      {fieldType === 'null' && (
+        <p className="text-xs text-slate-500 italic">Value will be set to null</p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={!fieldName.trim()}
+          className="px-2.5 py-1 text-xs rounded-md bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white transition-colors"
+        >
+          Add
+        </button>
+        <button
+          type="button"
+          onClick={() => { reset(); setOpen(false) }}
+          className="px-2.5 py-1 text-xs rounded-md border border-slate-600 text-slate-400 hover:text-slate-300 hover:border-slate-500 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function EditableFieldRow({ label, displayValue, schema, isEditing, isPending, canEdit, onEdit, onCommit, onCancel, onRevert }) {
   if (isEditing) {
     return (
@@ -531,6 +750,7 @@ export default function ItemPage() {
                         ...new Set([
                           ...Object.keys(item).filter((k) => !k.startsWith('_')),
                           ...Object.keys(schemaProps).filter((k) => !k.startsWith('_')),
+                          ...Object.keys(pendingEdits).filter((k) => !k.startsWith('_')),
                         ]),
                       ].map((key) => (
                         <EditableFieldRow
@@ -548,7 +768,9 @@ export default function ItemPage() {
                         />
                       ))}
                     </div>
-
+                    {hasPatch && navItem.itemAllowsAdditionalProps && (
+                      <AddFieldRow onAdd={(name, val) => commitEdit(name, val)} />
+                    )}
                     {/* Managed fields */}
                     <div className="border-t border-slate-700 pt-3">
                       <button
