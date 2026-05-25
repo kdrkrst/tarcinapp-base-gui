@@ -356,7 +356,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSortColumn }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -480,19 +480,43 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-slate-800/60 border-b border-slate-700">
-            {columns.map((col) => (
+            {columns.map((col) => {
+              const sortEntry = sortOrder?.find((s) => s.field === col.key)
+              const isSorted = !!sortEntry
+              return (
               <th
                 key={col.key}
-                className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap cursor-default"
+                className={`text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap select-none transition-colors ${
+                  onSortColumn ? 'cursor-pointer hover:bg-slate-700/50' : 'cursor-default'
+                } ${isSorted ? 'text-blue-400' : 'text-slate-400'}`}
+                onClick={onSortColumn ? () => onSortColumn(col.key) : undefined}
                 onMouseEnter={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect()
                   setColTooltip({ key: col.key, x: rect.left, y: rect.bottom + 4 })
                 }}
                 onMouseLeave={() => setColTooltip(null)}
               >
-                {col.label}
+                <span className="inline-flex items-center gap-1">
+                  {col.label}
+                  {isSorted ? (
+                    sortEntry.dir === 'ASC' ? (
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                      </svg>
+                    )
+                  ) : onSortColumn ? (
+                    <svg className="w-3 h-3 flex-shrink-0 opacity-0 group-hover:opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9" />
+                    </svg>
+                  ) : null}
+                </span>
               </th>
-            ))}
+              )
+            })}
             <th className="p-0 sticky right-0 bg-slate-900 border-l border-slate-700/50">
               <div className="flex items-center justify-center py-3 px-1" style={{ width: 34 }}>
                 <button

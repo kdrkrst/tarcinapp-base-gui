@@ -136,6 +136,17 @@ function buildFilterFieldsParams(qs, fieldSelectorState) {
   }
 }
 
+function buildFilterOrderParams(qs, sortOrder) {
+  if (!sortOrder.length) return
+  if (sortOrder.length === 1) {
+    qs.set('filter[order]', `${sortOrder[0].field} ${sortOrder[0].dir}`)
+  } else {
+    sortOrder.forEach(({ field, dir }, i) => {
+      qs.set(`filter[order][${i}]`, `${field} ${dir}`)
+    })
+  }
+}
+
 function parseJwt(token) {
   if (!token) return null
   const parts = token.split('.')
@@ -459,6 +470,8 @@ export default function ResourcePage() {
   const [filterPanelOpen, setFilterPanelOpen] = useState(false)
   // fieldSelectorState: { mode: 'all'|'exclude'|'none'|'include', selected: Set<string> }
   const [fieldSelectorState, setFieldSelectorState] = useState({ mode: 'all', selected: new Set() })
+  // sortOrder: [{ field: string, dir: 'ASC'|'DESC' }]
+  const [sortOrder, setSortOrder] = useState([])
   const [selectedQ, setSelectedQ] = useState(null)
   const [selectedFieldset, setSelectedFieldset] = useState(null)
   const [queryInfoTab, setQueryInfoTab] = useState('request')
@@ -531,8 +544,9 @@ export default function ResourcePage() {
     if (selectedQ) qs.set('q', selectedQ)
     if (selectedFieldset) qs.set('fieldset', selectedFieldset)
     buildFilterFieldsParams(qs, fieldSelectorState)
+    buildFilterOrderParams(qs, sortOrder)
     return formatQueryPreview(qs)
-  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState])
+  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
 
   useEffect(() => {
     setPage(0)
@@ -541,6 +555,7 @@ export default function ResourcePage() {
     setFieldSelectorState({ mode: 'all', selected: new Set() })
     setSelectedQ(null)
     setSelectedFieldset(null)
+    setSortOrder([])
   }, [navItem?.collectionPath, statusSelections, visibilitySelections])
 
   useEffect(() => {
@@ -589,6 +604,7 @@ export default function ResourcePage() {
     if (selectedQ) qs.set('q', selectedQ)
     if (selectedFieldset) qs.set('fieldset', selectedFieldset)
     buildFilterFieldsParams(qs, fieldSelectorState)
+    buildFilterOrderParams(qs, sortOrder)
 
     const start = performance.now()
     const { data, headers, status, requestHeaders: reqHeaders } = await getWithMeta(`${navItem.collectionPath}?${qs.toString()}`)
@@ -597,7 +613,7 @@ export default function ResourcePage() {
     setResponseStatus(status)
     setRequestHeaders(reqHeaders ?? null)
     return data ?? []
-  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState])
+  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
 
   const { data, loading, error, refresh } = useResourceList(fetcher)
 
@@ -656,6 +672,16 @@ export default function ResourcePage() {
     },
     [patch, navItem?.itemPathTemplate, refresh]
   )
+
+  const handleSortColumn = useCallback((field) => {
+    setSortOrder((prev) => {
+      const existing = prev.find((s) => s.field === field)
+      if (!existing) return [{ field, dir: 'ASC' }]
+      if (existing.dir === 'ASC') return [{ field, dir: 'DESC' }]
+      return []
+    })
+    setPage(0)
+  }, [])
 
   const columns = useMemo(() => {
     const all = deriveColumns(data)
@@ -812,6 +838,7 @@ export default function ResourcePage() {
               statusSelections.length > 0,
               visibilitySelections.length > 0,
               fieldSelectorState.mode !== 'all',
+              sortOrder.length > 0,
             ].filter(Boolean).length
             return (
               <button
@@ -884,9 +911,9 @@ export default function ResourcePage() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-200">Filters</p>
             <div className="flex items-center gap-3">
-              {[selectedQ !== null, selectedFieldset !== null, statusSelections.length > 0, visibilitySelections.length > 0, fieldSelectorState.mode !== 'all'].some(Boolean) && (
+              {[selectedQ !== null, selectedFieldset !== null, statusSelections.length > 0, visibilitySelections.length > 0, fieldSelectorState.mode !== 'all', sortOrder.length > 0].some(Boolean) && (
                 <button
-                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setStatusSelections([]); setVisibilitySelections([]); setFieldSelectorState({ mode: 'all', selected: new Set() }); setPage(0) }}
+                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setStatusSelections([]); setVisibilitySelections([]); setFieldSelectorState({ mode: 'all', selected: new Set() }); setSortOrder([]); setPage(0) }}
                   className="text-xs text-slate-400 hover:text-blue-400 transition-colors"
                 >
                   Clear all
@@ -1110,6 +1137,79 @@ export default function ResourcePage() {
               </div>
             </>
           )}
+
+          {/* Sort */}
+          {navItem.hasFilterOrder && (
+            <>
+              <hr className="border-slate-700" />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Sort</p>
+                  {sortOrder.length > 0 && (
+                    <button
+                      onClick={() => { setSortOrder([]); setPage(0) }}
+                      className="text-xs text-slate-400 hover:text-slate-200 underline"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {sortOrder.map((entry, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-slate-500 w-4 flex-shrink-0">{i + 1}.</span>
+                    <select
+                      value={entry.field}
+                      onChange={(e) => setSortOrder((prev) => prev.map((s, idx) => idx === i ? { ...s, field: e.target.value } : s))}
+                      className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      {availableFields.map((f) => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                    <button
+                      onClick={() => setSortOrder((prev) => prev.map((s, idx) => idx === i ? { ...s, dir: s.dir === 'ASC' ? 'DESC' : 'ASC' } : s))}
+                      className="inline-flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors font-mono flex-shrink-0"
+                    >
+                      {entry.dir === 'ASC' ? (
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                        </svg>
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                        </svg>
+                      )}
+                      {entry.dir}
+                    </button>
+                    <button
+                      onClick={() => { setSortOrder((prev) => prev.filter((_, idx) => idx !== i)); setPage(0) }}
+                      className="flex-shrink-0 text-slate-500 hover:text-rose-400 transition-colors"
+                      aria-label="Remove sort"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+
+                <button
+                  onClick={() => setSortOrder((prev) => [...prev, { field: availableFields[0] ?? '_id', dir: 'ASC' }])}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add sort field
+                </button>
+
+                {sortOrder.length > 0 && (
+                  <p className="text-[10px] text-slate-500 font-mono">
+                    {sortOrder.map((s) => `${s.field} ${s.dir}`).join(', ')}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1271,6 +1371,8 @@ export default function ResourcePage() {
           onRowDelete={canDeleteItem ? handleDeleteRow : undefined}
           onRowActivate={canActivate ? handleActivateRow : undefined}
           onRowDeactivate={canDeactivate ? handleDeactivateRow : undefined}
+          sortOrder={sortOrder}
+          onSortColumn={navItem?.hasFilterOrder ? handleSortColumn : undefined}
         />
       </div>
 
@@ -1440,6 +1542,7 @@ export default function ResourcePage() {
                   </div>
                 </div>
               )}
+
             </div>
 
             {/* ── RESPONSE ── */}

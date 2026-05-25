@@ -200,6 +200,7 @@ export function parseOasSpec(spec) {
         (p) => p?.name === 'filter' && p?.in === 'query' && p?.style === 'deepObject'
       )
       const hasFilterFields = !!(filterParam?.schema?.properties?.fields)
+      const hasFilterOrder = !!(filterParam?.schema?.properties?.order)
 
       const hasFieldset = collectionGetParams.some((p) => p?.name === 'fieldset' && p?.in === 'query')
       const hasFields = collectionGetParams.some((p) => p?.name === 'fields' && p?.in === 'query')
@@ -228,6 +229,7 @@ export function parseOasSpec(spec) {
         hasSearch,
         hasValidityDates,
         hasFilterFields,
+        hasFilterOrder,
         hasFieldset,
         hasFields,
         qEnumValues,
