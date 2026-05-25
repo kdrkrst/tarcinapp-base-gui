@@ -5,6 +5,7 @@ import { parseOasSpec } from '../../utils/oasParser'
 import { useApiClient } from '../../services/apiClient'
 import { useResourceList } from '../../hooks/useResourceList'
 import Toast from '../ui/Toast'
+import ConfirmDialog from '../ui/ConfirmDialog'
 
 function buildItemPath(template, id) {
   return template.replace(/\{[^}]+\}/, encodeURIComponent(id))
@@ -549,6 +550,7 @@ export default function ItemPage() {
   const [actionError, setActionError] = useState(null)
   const [actionSuccess, setActionSuccess] = useState(null)
   const [acting, setActing] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [toastError, setToastError] = useState(null)
 
   // Inline edit state
@@ -660,11 +662,11 @@ export default function ItemPage() {
 
   if (!navItem || !itemPath) return null
 
+  const schemaProps = navItem.itemSchemaProps ?? {}
   const hasEdit = navItem.itemMethods?.some((m) => ['patch', 'put', 'delete'].includes(m))
   const hasPatch = navItem.itemMethods?.includes('patch')
   const canActivate = hasPatch && '_validFromDateTime' in schemaProps
   const decodedId = decodeURIComponent(itemId ?? '')
-  const schemaProps = navItem.itemSchemaProps ?? {}
   const hasPendingEdits = Object.keys(pendingEdits).length > 0
 
   return (
@@ -911,7 +913,7 @@ export default function ItemPage() {
               )}
               {navItem.itemMethods.includes('delete') && (
                 <button
-                  onClick={() => runAction('delete')}
+                  onClick={() => setConfirmDelete(true)}
                   disabled={acting}
                   className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-rose-700 hover:bg-rose-600 disabled:opacity-50 text-white"
                 >
@@ -925,6 +927,14 @@ export default function ItemPage() {
 
       <Toast message={toastSuccess} onClose={() => setToastSuccess(null)} type="success" />
       <Toast message={toastError} onClose={() => setToastError(null)} type="error" />
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete this record?"
+        message="This action cannot be undone."
+        confirmLabel="Yes, delete"
+        onConfirm={() => { setConfirmDelete(false); runAction('delete') }}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </>
   )
 }

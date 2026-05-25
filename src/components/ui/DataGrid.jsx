@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import ConfirmDialog from './ConfirmDialog'
 
 // ─── Managed fields registry ───────────────────────────────────────────────
 const MANAGED_FIELDS_META = {
@@ -200,7 +201,7 @@ function FieldRow({ fieldKey, meta, value }) {
   )
 }
 
-function ManagedFieldsPanel({ row, onEdit, onCollapse, onActivate, onDelete }) {
+function ManagedFieldsPanel({ row, onEdit, onActivate, onDelete }) {
   const accessFields = []
   const otherFields = []
   const nonManagedFields = []
@@ -280,15 +281,6 @@ function ManagedFieldsPanel({ row, onEdit, onCollapse, onActivate, onDelete }) {
             Edit
           </button>
         )}
-        <button
-          onClick={onCollapse}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-300 hover:bg-slate-800/60 border border-transparent hover:border-slate-700 transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" />
-          </svg>
-          Collapse
-        </button>
         {onDelete && (
           <button
             onClick={onDelete}
@@ -355,6 +347,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const [hoveredRow, setHoveredRow] = useState(null)
   const [colTooltip, setColTooltip] = useState(null)
   const [expandedRowId, setExpandedRowId] = useState(null)
+  const [pendingDeleteRow, setPendingDeleteRow] = useState(null)
   const scrollContainerRef = useRef(null)
   const [containerWidth, setContainerWidth] = useState(null)
 
@@ -576,7 +569,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                 )}
                 {onRowDelete && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); onRowDelete(row) }}
+                    onClick={(e) => { e.stopPropagation(); setPendingDeleteRow(row) }}
                     className="p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-900/30 transition-colors"
                     title="Delete record"
                     aria-label="Delete record"
@@ -597,8 +590,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       row={row}
                       onEdit={onRowClick ? () => onRowClick(row) : undefined}
                       onActivate={onRowActivate ? () => onRowActivate(row) : undefined}
-                      onDelete={onRowDelete ? () => onRowDelete(row) : undefined}
-                      onCollapse={() => setExpandedRowId(null)}
+                      onDelete={onRowDelete ? () => setPendingDeleteRow(row) : undefined}
                     />
                   </div>
                 </td>
@@ -609,6 +601,15 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
           })}
         </tbody>
       </table>
+
+      <ConfirmDialog
+        open={pendingDeleteRow !== null}
+        title="Delete record"
+        message="This action cannot be undone."
+        confirmLabel="Yes, delete"
+        onConfirm={() => { onRowDelete(pendingDeleteRow); setPendingDeleteRow(null) }}
+        onCancel={() => setPendingDeleteRow(null)}
+      />
     </div>
   )
 }
