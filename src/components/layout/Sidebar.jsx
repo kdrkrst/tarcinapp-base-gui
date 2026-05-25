@@ -13,7 +13,32 @@ const BASE_TYPE_ICON = {
   unknown:          'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10',
 }
 
-function NavIcon({ d, size = 'w-4 h-4' }) {
+const BASE_TYPE_LABEL = {
+  entity:           'Entities',
+  list:             'Lists',
+  relation:         'Relations',
+  'entity-reaction':'Entity Reactions',
+  'list-reaction':  'List Reactions',
+}
+
+const BASE_TYPE_ORDER = ['entity', 'list', 'relation', 'entity-reaction', 'list-reaction']
+
+/** Group navItems by baseType, preserving BASE_TYPE_ORDER. Unknown types go last. */
+function groupByBaseType(navItems) {
+  const groups = {}
+  for (const item of navItems) {
+    const key = item.baseType ?? 'unknown'
+    if (!groups[key]) groups[key] = []
+    groups[key].push(item)
+  }
+  const orderedKeys = [
+    ...BASE_TYPE_ORDER.filter((k) => groups[k]),
+    ...Object.keys(groups).filter((k) => !BASE_TYPE_ORDER.includes(k)),
+  ]
+  return orderedKeys.map((key) => ({ baseType: key, items: groups[key] }))
+}
+
+function NavIcon({ d, size = 'w-3.5 h-3.5' }) {
   return (
     <svg
       className={`${size} flex-shrink-0`}
@@ -32,6 +57,7 @@ export default function Sidebar({ collapsed = false, onToggle }) {
   const { oasSpec, disconnect, retry, bypassCache, setBypassCache } = useApp()
   const { navItems } = oasSpec ? parseOasSpec(oasSpec) : { navItems: [] }
   const [expanded, setExpanded] = useState({})
+  const navGroups = groupByBaseType(navItems)
 
   function toggle(id) {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -40,7 +66,7 @@ export default function Sidebar({ collapsed = false, onToggle }) {
   return (
     <aside
       className={`flex flex-col min-h-screen bg-slate-900 border-r border-slate-800 transition-all duration-200 flex-shrink-0 ${
-        collapsed ? 'w-16' : 'w-64'
+        collapsed ? 'w-14' : 'w-56'
       }`}
     >
       {/* Brand */}
@@ -61,15 +87,15 @@ export default function Sidebar({ collapsed = false, onToggle }) {
       </div>
 
       {/* Navigation */}
-      <nav className={`flex-1 py-4 space-y-0.5 overflow-y-auto ${collapsed ? 'px-2' : 'px-3'}`}>
+      <nav className={`flex-1 py-2 space-y-0 overflow-y-auto ${collapsed ? 'px-1.5' : 'px-2'}`}>
         {/* Dashboard */}
         <NavLink
           to="/"
           end
           title={collapsed ? 'Dashboard' : undefined}
           className={({ isActive }) =>
-            `flex items-center rounded-lg text-sm transition-all duration-150 ${
-              collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'
+            `flex items-center rounded-md text-xs transition-all duration-150 ${
+              collapsed ? 'justify-center px-0 py-1.5' : 'gap-2 px-2.5 py-1.5'
             } ${
               isActive
                 ? 'bg-blue-600 text-white font-medium'
@@ -81,76 +107,79 @@ export default function Sidebar({ collapsed = false, onToggle }) {
           {!collapsed && 'Dashboard'}
         </NavLink>
 
-        {navItems.length > 0 && !collapsed && (
-          <p className="px-2 pt-4 pb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-            Resources
-          </p>
-        )}
-
-        {navItems.map((item) => {
-          const iconPath = BASE_TYPE_ICON[item.baseType ?? 'unknown'] ?? BASE_TYPE_ICON.unknown
-          return (
-            <div key={item.id}>
-              <div className="flex items-center">
-                <NavLink
-                  to={item.routePath}
-                  title={collapsed ? item.label : undefined}
-                  className={({ isActive }) =>
-                    `flex items-center rounded-lg text-sm transition-all duration-150 ${
-                      collapsed ? 'flex-1 justify-center px-0 py-2.5' : 'flex-1 gap-3 px-3 py-2.5'
-                    } ${
-                      isActive
-                        ? 'bg-blue-600 text-white font-medium'
-                        : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
-                    }`
-                  }
-                >
-                  <NavIcon d={iconPath} />
-                  {!collapsed && item.label}
-                </NavLink>
-
-                {!collapsed && item.children.length > 0 && (
-                  <button
-                    onClick={() => toggle(item.id)}
-                    className="p-1.5 mr-1 rounded text-slate-500 hover:text-slate-300 transition-colors"
-                    aria-label={expanded[item.id] ? 'Collapse' : 'Expand'}
-                  >
-                    <svg
-                      className={`w-3.5 h-3.5 transition-transform duration-150 ${expanded[item.id] ? 'rotate-90' : ''}`}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-
-              {!collapsed && expanded[item.id] && item.children.length > 0 && (
-                <div className="ml-4 mt-0.5 pl-2 border-l border-slate-800 space-y-0.5">
-                  {item.children.map((child) => (
+        {navGroups.map(({ baseType, items }) => (
+          <div key={baseType}>
+            {!collapsed && (
+              <p className="px-2 pt-3 pb-0.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                {BASE_TYPE_LABEL[baseType] ?? baseType}
+              </p>
+            )}
+            {items.map((item) => {
+              const iconPath = BASE_TYPE_ICON[item.baseType ?? 'unknown'] ?? BASE_TYPE_ICON.unknown
+              return (
+                <div key={item.id}>
+                  <div className="flex items-center">
                     <NavLink
-                      key={child.id}
-                      to={child.routePath}
+                      to={item.routePath}
+                      title={collapsed ? item.label : undefined}
                       className={({ isActive }) =>
-                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all duration-150 ${
+                        `flex items-center rounded-md text-xs transition-all duration-150 ${
+                          collapsed ? 'flex-1 justify-center px-0 py-1.5' : 'flex-1 gap-2 px-2.5 py-1.5'
+                        } ${
                           isActive
-                            ? 'bg-blue-600/80 text-white font-medium'
-                            : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'
+                            ? 'bg-blue-600 text-white font-medium'
+                            : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
                         }`
                       }
                     >
-                      <NavIcon d="M7 16l-4-4m0 0l4-4m-4 4h18" />
-                      {child.label}
+                      <NavIcon d={iconPath} />
+                      {!collapsed && item.label}
                     </NavLink>
-                  ))}
+
+                    {!collapsed && item.children.length > 0 && (
+                      <button
+                        onClick={() => toggle(item.id)}
+                        className="p-1 mr-0.5 rounded text-slate-500 hover:text-slate-300 transition-colors"
+                        aria-label={expanded[item.id] ? 'Collapse' : 'Expand'}
+                      >
+                        <svg
+                          className={`w-3.5 h-3.5 transition-transform duration-150 ${expanded[item.id] ? 'rotate-90' : ''}`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+
+                  {!collapsed && expanded[item.id] && item.children.length > 0 && (
+                    <div className="ml-3 mt-0 pl-2 border-l border-slate-800 space-y-0">
+                      {item.children.map((child) => (
+                        <NavLink
+                          key={child.id}
+                          to={child.routePath}
+                          className={({ isActive }) =>
+                            `flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all duration-150 ${
+                              isActive
+                                ? 'bg-blue-600/80 text-white font-medium'
+                                : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'
+                            }`
+                          }
+                        >
+                          <NavIcon d="M7 16l-4-4m0 0l4-4m-4 4h18" />
+                          {child.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          )
-        })}
+              )
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Bottom actions */}
