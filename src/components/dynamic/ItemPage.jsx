@@ -682,7 +682,7 @@ export default function ItemPage() {
   const hasEdit = navItem.itemMethods?.some((m) => ['patch', 'put', 'delete'].includes(m))
   const hasPatch = navItem.itemMethods?.includes('patch')
   const canActivate = hasPatch && '_validFromDateTime' in schemaProps
-  const canDeactivate = hasPatch && '_validUntilDateTime' in schemaProps
+  const canDeactivate = hasPatch && '_validUntilDateTime' in schemaProps && !!item._validFromDateTime && new Date(item._validFromDateTime) <= new Date()
   const decodedId = decodeURIComponent(itemId ?? '')
   const hasPendingEdits = Object.keys(pendingEdits).length > 0
 

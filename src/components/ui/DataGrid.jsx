@@ -366,8 +366,11 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const [pendingDeleteRow, setPendingDeleteRow] = useState(null)
   const [pendingActivateRow, setPendingActivateRow] = useState(null)
   const [pendingDeactivateRow, setPendingDeactivateRow] = useState(null)
+  const [actionsExpanded, setActionsExpanded] = useState(false)
   const scrollContainerRef = useRef(null)
   const [containerWidth, setContainerWidth] = useState(null)
+
+  const actionColWidth = Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate].filter(Boolean).length * 36)
 
   useEffect(() => {
     const el = scrollContainerRef.current
@@ -490,7 +493,26 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                 {col.label}
               </th>
             ))}
-            <th className="w-10 px-2 py-3 sticky right-0 bg-slate-800/60" style={{ minWidth: Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate].filter(Boolean).length * 36) }} />
+            <th className="p-0 sticky right-0 bg-slate-900 border-l border-slate-700/50">
+              <div className="flex items-center justify-center py-3 px-1" style={{ width: 34 }}>
+                <button
+                  onClick={() => setActionsExpanded(v => !v)}
+                  className="flex items-center justify-center w-6 h-6 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-700 transition-colors"
+                  title={actionsExpanded ? 'Collapse actions' : 'Expand actions'}
+                  aria-label={actionsExpanded ? 'Collapse actions' : 'Expand actions'}
+                >
+                  {actionsExpanded ? (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 19.5l7.5-7.5-7.5-7.5m6 15l7.5-7.5-7.5-7.5" />
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800">
@@ -559,9 +581,16 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       : String(row[col.key] ?? '—')}
                 </td>
               ))}
-              <td className="px-2 py-3 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800/40" style={{ minWidth: Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate].filter(Boolean).length * 36) }}>
+              <td className="p-0 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800 border-l border-slate-700/50">
+                <div
+                  className="overflow-hidden transition-all duration-200 ease-in-out"
+                  style={{
+                    maxWidth: actionsExpanded ? `${actionColWidth + 16}px` : '0px',
+                    padding: actionsExpanded ? '12px 8px' : '12px 0px',
+                  }}
+                >
                 <div className="flex items-center justify-center gap-1">
-                {(onRowActivate || onRowDeactivate) && (
+                {(onRowActivate || (onRowDeactivate && computeRowStatus(row) === 'active')) && (
                   <div className="inline-flex rounded-md border border-slate-700 overflow-hidden">
                     {onRowActivate && (
                       <button
@@ -575,10 +604,10 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                         </svg>
                       </button>
                     )}
-                    {onRowActivate && onRowDeactivate && (
+                    {onRowActivate && onRowDeactivate && computeRowStatus(row) === 'active' && (
                       <span className="w-px bg-slate-700 self-stretch" />
                     )}
-                    {onRowDeactivate && (
+                    {onRowDeactivate && computeRowStatus(row) === 'active' && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setPendingDeactivateRow(row) }}
                         className="p-1.5 text-slate-600 hover:text-amber-400 hover:bg-amber-900/30 transition-colors"
@@ -617,6 +646,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                   </button>
                 )}
                 </div>
+                </div>
               </td>
             </tr>
             {isExpanded && (
@@ -627,7 +657,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       row={row}
                       onEdit={onRowClick ? () => onRowClick(row) : undefined}
                       onActivate={onRowActivate ? () => setPendingActivateRow(row) : undefined}
-                      onDeactivate={onRowDeactivate ? () => setPendingDeactivateRow(row) : undefined}
+                      onDeactivate={onRowDeactivate && computeRowStatus(row) === 'active' ? () => setPendingDeactivateRow(row) : undefined}
                       onDelete={onRowDelete ? () => setPendingDeleteRow(row) : undefined}
                     />
                   </div>
