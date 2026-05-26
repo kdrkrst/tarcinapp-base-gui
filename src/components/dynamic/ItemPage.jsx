@@ -176,7 +176,7 @@ function FieldEditor({ currentValue, schema, onCommit, onCancel }) {
       <div className="mt-1">
         <div className="flex flex-wrap gap-1.5 mb-2 min-h-[24px]">
           {arr.length === 0 ? (
-            <span className="text-xs text-slate-500 italic">empty \u2014 add items below</span>
+            <span className="text-xs text-slate-500 italic">empty — add items below</span>
           ) : (
             arr.map((it, i) => (
               <span
@@ -189,7 +189,7 @@ function FieldEditor({ currentValue, schema, onCommit, onCancel }) {
                   onClick={() => setLocalVal(arr.filter((_, j) => j !== i))}
                   className="text-slate-400 hover:text-red-400 transition-colors leading-none ml-0.5"
                 >
-                  \u00d7
+                  ×
                 </button>
               </span>
             ))
@@ -792,7 +792,7 @@ export default function ItemPage() {
                 </div>
 
                 {loading ? (
-                  <p className="text-slate-400 text-sm">Loading\u2026</p>
+                  <p className="text-slate-400 text-sm">Loading…</p>
                 ) : error ? (
                   <p className="text-red-400 text-sm">{error}</p>
                 ) : (
