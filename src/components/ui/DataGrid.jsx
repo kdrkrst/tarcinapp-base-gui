@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import ConfirmDialog from './ConfirmDialog'
+import ItemEditModal from './ItemEditModal'
+import { useApiClient } from '../../services/apiClient'
 
 // ─── Managed fields registry ───────────────────────────────────────────────
 const MANAGED_FIELDS_META = {
@@ -173,6 +175,7 @@ const ACCESS_FIELDS = new Set([
 ])
 
 function FieldRow({ fieldKey, meta, value }) {
+  const [objectExpanded, setObjectExpanded] = useState(false)
   const detectedType = meta?.type
     ?? (Array.isArray(value) ? 'array'
       : typeof value === 'object' && value !== null ? 'object'
@@ -186,17 +189,39 @@ function FieldRow({ fieldKey, meta, value }) {
     string:   'text-slate-500',
   }
 
+  const isExpandableObj = detectedType === 'object' && typeof value === 'object' && value !== null
+
   return (
-    <div className="flex items-center gap-2 py-1 min-w-0">
-      <span className={`flex-shrink-0 ${TYPE_COLOR[detectedType] ?? 'text-slate-500'}`}>
-        <TypeIcon type={detectedType} />
-      </span>
-      <span className="text-slate-500 text-[11px] font-mono flex-shrink-0 w-36 truncate" title={fieldKey}>
-        {fieldKey}
-      </span>
-      <span className="min-w-0 truncate">
-        {renderCompactValue(fieldKey, value, detectedType)}
-      </span>
+    <div className="py-1 min-w-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className={`flex-shrink-0 ${TYPE_COLOR[detectedType] ?? 'text-slate-500'}`}>
+          <TypeIcon type={detectedType} />
+        </span>
+        <span className="text-slate-500 text-[11px] font-mono flex-shrink-0 w-36 truncate" title={fieldKey}>
+          {fieldKey}
+        </span>
+        <span className="min-w-0">
+          {isExpandableObj ? (
+            <button
+              type="button"
+              onClick={() => setObjectExpanded((v) => !v)}
+              className="inline-flex items-center gap-1 text-emerald-400 text-[11px] font-mono hover:text-emerald-300 transition-colors"
+            >
+              <span>{'{…}'}</span>
+              <svg className={`w-2.5 h-2.5 transition-transform ${objectExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+          ) : (
+            renderCompactValue(fieldKey, value, detectedType)
+          )}
+        </span>
+      </div>
+      {isExpandableObj && objectExpanded && (
+        <pre className="ml-6 mt-1 text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto max-h-40 whitespace-pre-wrap break-all leading-relaxed">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      )}
     </div>
   )
 }
@@ -258,7 +283,7 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete })
           </div>
         )}
       </div>
-      <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-800/70">
+      <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-800/70 -mx-4 px-4">
         {(onActivate || onDeactivate) && (
           <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
             {onActivate && (
@@ -313,6 +338,400 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete })
   )
 }
 
+const TRAVERSAL_PAGE_SIZE = 10
+
+function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
+  const id = item._id
+  const shortId = id ? (id.length > 14 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id) : null
+  const unmanagedFields = Object.entries(item).filter(([k]) => {
+    if (k.startsWith('_')) return false
+    if (visibleFields !== null && visibleFields !== undefined && !visibleFields.has(k)) return false
+    return true
+  })
+
+  const status = computeRowStatus(item)
+  const borderColor = STATUS_SHADOW_COLOR[status]
+
+  const visibilityLabel = item._visibility
+    ? item._visibility.charAt(0).toUpperCase() + item._visibility.slice(1)
+    : null
+  const visibilityColor = item._visibility === 'public'
+    ? 'text-emerald-400'
+    : item._visibility === 'protected'
+      ? 'text-amber-400'
+      : item._visibility === 'private'
+        ? 'text-rose-400'
+        : 'text-slate-500'
+
+  return (
+    <div
+      className="group flex items-center gap-2 pl-3 pr-2 py-1.5 rounded border border-slate-800 hover:border-slate-600 hover:bg-slate-800/50 transition-colors min-w-0"
+      style={{ boxShadow: `inset 3px 0 0 ${borderColor}` }}
+    >
+      {/* short ID + copy */}
+      {id && (
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <span className="font-mono text-[10px] text-slate-500" title={id}>{shortId}</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); onCopyId(id) }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-500 hover:text-slate-300"
+            title="Copy ID"
+            aria-label="Copy ID"
+          >
+            {copiedId === id ? (
+              <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+            ) : (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            )}
+          </button>
+        </div>
+      )}
+      {/* kind badge */}
+      {item._kind && (
+        <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-violet-900/40 border border-violet-700/50 text-violet-300 text-[10px]">{item._kind}</span>
+      )}
+      {/* name + visibility grouped, left-aligned */}
+      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+        {item._name && (
+          <span className="text-slate-200 text-xs font-medium truncate min-w-0" title={item._name}>{item._name}</span>
+        )}
+        {visibilityLabel && (
+          <span className={`flex-shrink-0 text-[10px] font-medium ${visibilityColor}`}>{visibilityLabel}</span>
+        )}
+      </div>
+      {/* unmanaged fields inline as key: value pairs */}
+      {unmanagedFields.map(([k, v]) => (
+        <span key={k} className="flex-shrink-0 text-[10px] text-slate-500 hidden sm:inline">
+          <span className="text-slate-600">{k}:</span>{' '}
+          <span className="text-slate-300 font-mono">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+        </span>
+      ))}
+      {/* edit button */}
+      {onEdit && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onEdit(item) }}
+          className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-slate-700"
+          title="View / Edit record"
+          aria-label="View / Edit record"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+          </svg>
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ExpandedRowPanel({
+  row, fullRecord, fullRecordLoading,
+  traversals, selectedTraversal, onSelectTraversal,
+  traversalData, traversalLoading, traversalPage, traversalHasNextPage,
+  onTraversalPrev, onTraversalNext,
+  onAddItem, onDeleteAll, onUpdateAll,
+  copiedId, onCopyId,
+  onEdit, onActivate, onDeactivate, onDelete,
+  onViewTraversalItem,
+  traversalStatusFilter, onTraversalStatusFilterChange,
+  traversalVisibilityFilter, onTraversalVisibilityFilterChange,
+  traversalSortField, onTraversalSortFieldChange,
+  traversalSortDir, onTraversalSortDirChange,
+  traversalVisibleFields, onTraversalVisibleFieldsChange,
+}) {
+  const displayRecord = fullRecord ?? row
+  const title = displayRecord._name ?? displayRecord._kind ?? null
+
+  // Synthetic traversals derived from relation/reaction ID fields
+  const syntheticTraversals = []
+  if (displayRecord._entityId) {
+    syntheticTraversals.push({ subResource: '__entity', label: 'Related Entity', synthetic: true, fieldValue: displayRecord._entityId, methods: [] })
+  }
+  if (displayRecord._listId) {
+    syntheticTraversals.push({ subResource: '__list', label: 'Related List', synthetic: true, fieldValue: displayRecord._listId, methods: [] })
+  }
+  const allTraversals = [...(traversals ?? []), ...syntheticTraversals]
+  const hasTraversalOptions = allTraversals.length > 0
+
+  // Derive available sort/visible fields from traversal data
+  const availableFields = selectedTraversal && !selectedTraversal.synthetic && traversalData.length > 0
+    ? [...new Set(traversalData.flatMap((item) => Object.keys(item)))]
+    : []
+  const availableSortFields = availableFields.filter((k) => !['_slug', '_fromMetadata', '_toMetadata'].includes(k))
+  const availableVisibleFields = availableFields.filter((k) => !k.startsWith('_'))
+
+  const showFilterBar = selectedTraversal && !selectedTraversal.synthetic
+
+  return (
+    <div className="bg-slate-950/60 border-t border-slate-700/40">
+      {/* Tab bar */}
+      <div className="flex items-stretch border-b border-slate-800">
+        {/* Record name */}
+        {title && (
+          <div className="flex items-center gap-1.5 px-4 flex-shrink-0">
+            {fullRecordLoading && (
+              <svg className="animate-spin w-3 h-3 text-slate-500" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+            )}
+            <span className="text-xs font-semibold text-slate-300 truncate max-w-[180px]" title={title}>{title}</span>
+            <span className="text-slate-700 select-none">|</span>
+          </div>
+        )}
+        {/* Tabs */}
+        <div className="flex items-stretch overflow-x-auto">
+          <button
+            onClick={() => onSelectTraversal(null)}
+            className={`px-3 py-2 text-[11px] whitespace-nowrap border-b-2 transition-colors ${
+              !selectedTraversal
+                ? 'border-blue-500 text-blue-300'
+                : 'border-transparent text-slate-500 hover:text-slate-200 hover:border-slate-600'
+            }`}
+          >
+            Record
+          </button>
+          {allTraversals.map((t) => (
+            <button
+              key={t.subResource}
+              onClick={() => onSelectTraversal(t)}
+              className={`px-3 py-2 text-[11px] whitespace-nowrap border-b-2 transition-colors ${
+                selectedTraversal?.subResource === t.subResource
+                  ? 'border-blue-500 text-blue-300'
+                  : 'border-transparent text-slate-500 hover:text-slate-200 hover:border-slate-600'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Filter bar – only for real (non-synthetic) traversals */}
+      {showFilterBar && (
+        <div className="px-4 py-2 border-b border-slate-800/70 flex flex-wrap gap-x-4 gap-y-2 items-center">
+          {/* Status */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wide">Status</span>
+            <div className="inline-flex rounded border border-slate-700 overflow-hidden">
+              {[null, 'actives', 'pendings', 'expireds'].map((val, i) => (
+                <button
+                  key={i}
+                  onClick={() => onTraversalStatusFilterChange(val)}
+                  className={`px-2 py-0.5 text-[10px] border-r border-slate-700 last:border-r-0 transition-colors ${
+                    traversalStatusFilter === val
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  {val === null ? 'All' : val.charAt(0).toUpperCase() + val.slice(1, -1)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Visibility */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wide">Visibility</span>
+            <div className="inline-flex rounded border border-slate-700 overflow-hidden">
+              {[null, 'publics', 'protecteds', 'privates'].map((val, i) => (
+                <button
+                  key={i}
+                  onClick={() => onTraversalVisibilityFilterChange(val)}
+                  className={`px-2 py-0.5 text-[10px] border-r border-slate-700 last:border-r-0 transition-colors ${
+                    traversalVisibilityFilter === val
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                  }`}
+                >
+                  {val === null ? 'All' : val.charAt(0).toUpperCase() + val.slice(1, -1)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Sort field + direction */}
+          {availableSortFields.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide">Sort</span>
+              <select
+                value={traversalSortField}
+                onChange={(e) => onTraversalSortFieldChange(e.target.value)}
+                className="bg-slate-800 border border-slate-700 text-slate-300 text-[10px] rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-600"
+              >
+                <option value="">— none —</option>
+                {availableSortFields.map((f) => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+              {traversalSortField && (
+                <div className="inline-flex rounded border border-slate-700 overflow-hidden">
+                  {['ASC', 'DESC'].map((dir) => (
+                    <button
+                      key={dir}
+                      onClick={() => onTraversalSortDirChange(dir)}
+                      className={`px-2 py-0.5 text-[10px] border-r border-slate-700 last:border-r-0 transition-colors ${
+                        traversalSortDir === dir
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                      }`}
+                    >
+                      {dir}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Visible fields */}
+          {availableVisibleFields.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide">Fields</span>
+              <div className="flex flex-wrap gap-1">
+                {availableVisibleFields.map((f) => {
+                  const active = traversalVisibleFields === null || traversalVisibleFields.has(f)
+                  return (
+                    <button
+                      key={f}
+                      onClick={() => {
+                        if (traversalVisibleFields === null) {
+                          // currently all visible; hide this one
+                          const next = new Set(availableVisibleFields.filter((x) => x !== f))
+                          onTraversalVisibleFieldsChange(next.size === 0 ? null : next)
+                        } else {
+                          const next = new Set(traversalVisibleFields)
+                          if (next.has(f)) {
+                            next.delete(f)
+                            onTraversalVisibleFieldsChange(next.size === 0 ? null : next)
+                          } else {
+                            next.add(f)
+                            onTraversalVisibleFieldsChange(
+                              next.size === availableVisibleFields.length ? null : next
+                            )
+                          }
+                        }
+                      }}
+                      className={`px-1.5 py-0.5 text-[10px] rounded border transition-colors ${
+                        active
+                          ? 'border-slate-600 bg-slate-700 text-slate-200'
+                          : 'border-slate-700 bg-slate-900 text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Content: full record fields or traversal cards */}
+      {!selectedTraversal ? (
+        <ManagedFieldsPanel
+          row={displayRecord}
+          onEdit={onEdit}
+          onActivate={onActivate}
+          onDeactivate={onDeactivate}
+          onDelete={onDelete}
+        />
+      ) : (
+        <div>
+          {traversalLoading ? (
+            <div className="flex items-center justify-center py-8 gap-2">
+              <svg className="animate-spin w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+              <span className="text-xs text-slate-400">Loading {selectedTraversal.label}…</span>
+            </div>
+          ) : traversalData.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-slate-500 text-xs">
+              No {selectedTraversal.label} found.
+            </div>
+          ) : (
+            <div className="overflow-y-auto max-h-56">
+              <div className="px-3 py-1.5 flex flex-col gap-1">
+                {traversalData.map((item, idx) => (
+                  <RelatedItemCard
+                    key={item._id ?? idx}
+                    item={item}
+                    copiedId={copiedId}
+                    onCopyId={onCopyId}
+                    onEdit={onViewTraversalItem}
+                    visibleFields={traversalVisibleFields}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {!selectedTraversal?.synthetic && (
+          <div className="flex items-center gap-2 px-4 pt-2 pb-2.5 border-t border-slate-800/70">
+            <button
+              onClick={onTraversalPrev}
+              disabled={traversalPage === 0 || traversalLoading}
+              className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <button
+              onClick={onTraversalNext}
+              disabled={!traversalHasNextPage || traversalLoading}
+              className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+            <span className="text-[10px] text-slate-500 font-mono">page {traversalPage + 1}</span>
+            <div className="ml-auto flex items-center gap-1.5">
+              {onAddItem && (
+                <button
+                  onClick={onAddItem}
+                  disabled={traversalLoading}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-800/60 text-emerald-400 hover:text-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title={`Add to ${selectedTraversal?.label}`}
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  Add
+                </button>
+              )}
+              {onUpdateAll && (
+                <button
+                  onClick={onUpdateAll}
+                  disabled={traversalLoading}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title={`Update all ${selectedTraversal?.label}`}
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                  </svg>
+                  Update All
+                </button>
+              )}
+              {onDeleteAll && (
+                <button
+                  onClick={onDeleteAll}
+                  disabled={traversalLoading}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-rose-900/30 hover:bg-rose-800/50 border border-rose-800/50 text-rose-400 hover:text-rose-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title={`Delete all ${selectedTraversal?.label}`}
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                  </svg>
+                  Delete All
+                </button>
+              )}
+            </div>
+          </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function computeRowStatus(row) {
   const from = row._validFromDateTime ? new Date(row._validFromDateTime) : null
   const until = row._validUntilDateTime ? new Date(row._validUntilDateTime) : null
@@ -356,7 +775,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSortColumn }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -370,7 +789,33 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const scrollContainerRef = useRef(null)
   const [containerWidth, setContainerWidth] = useState(null)
 
-  const actionColWidth = Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate].filter(Boolean).length * 36)
+  // Traversal / full-record expansion state
+  const [fullRecord, setFullRecord] = useState(null)
+  const [fullRecordLoading, setFullRecordLoading] = useState(false)
+  const [selectedTraversal, setSelectedTraversal] = useState(null)
+  const [traversalData, setTraversalData] = useState([])
+  const [traversalLoading, setTraversalLoading] = useState(false)
+  const [traversalPage, setTraversalPage] = useState(0)
+  const [rowTraversalDropdownOpenId, setRowTraversalDropdownOpenId] = useState(null)
+  const [traversalActionModal, setTraversalActionModal] = useState(null) // { type: 'post'|'patch' }
+  const [traversalDeleteAllPending, setTraversalDeleteAllPending] = useState(false)
+  const [traversalActionLoading, setTraversalActionLoading] = useState(false)
+  const [traversalActionError, setTraversalActionError] = useState(null)
+  const [traversalRefreshKey, setTraversalRefreshKey] = useState(0)
+  const [relatedRecordModal, setRelatedRecordModal] = useState(null) // null | { loading, record, navItem, error }
+  // Traversal card filter state
+  const [traversalStatusFilter, setTraversalStatusFilter] = useState(null) // 'actives'|'pendings'|'expireds'|null
+  const [traversalVisibilityFilter, setTraversalVisibilityFilter] = useState(null) // 'publics'|'protecteds'|'privates'|null
+  const [traversalSortField, setTraversalSortField] = useState('')
+  const [traversalSortDir, setTraversalSortDir] = useState('ASC')
+  const [traversalVisibleFields, setTraversalVisibleFields] = useState(null) // null = all, or Set<string>
+  const api = useApiClient()
+  const rowTraversalDropdownRef = useRef(null)
+  const pendingTraversalRef = useRef(null)
+  const hasTraversals = traversals?.length > 0
+  const expandedRow = data?.find((r, i) => (r._id ?? i) === expandedRowId) ?? null
+
+  const actionColWidth = Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate, hasTraversals ? true : null].filter(Boolean).length * 36)
 
   useEffect(() => {
     const el = scrollContainerRef.current
@@ -380,6 +825,86 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
     setContainerWidth(el.clientWidth)
     return () => ro.disconnect()
   }, [])
+
+  // Reset expansion state when the expanded row changes
+  useEffect(() => {
+    setFullRecord(null)
+    setFullRecordLoading(false)
+    const pending = pendingTraversalRef.current
+    pendingTraversalRef.current = null
+    setSelectedTraversal(pending)
+    setTraversalData([])
+    setTraversalPage(0)
+  }, [expandedRowId])
+
+  // Fetch the full record (no fieldset) when a row is expanded
+  useEffect(() => {
+    if (!expandedRowId || !onFetchItem) return undefined
+    const expandedRow = data.find((r, i) => (r._id ?? i) === expandedRowId)
+    if (!expandedRow) return undefined
+    let cancelled = false
+    setFullRecordLoading(true)
+    onFetchItem(expandedRow)
+      .then((rec) => { if (!cancelled && rec) setFullRecord(rec) })
+      .catch(() => { /* fall back to list data */ })
+      .finally(() => { if (!cancelled) setFullRecordLoading(false) })
+    return () => { cancelled = true }
+  // data intentionally omitted — refetch only when row identity changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedRowId, onFetchItem])
+
+  // Fetch related items when a traversal is selected or page changes
+  useEffect(() => {
+    if (!selectedTraversal || !expandedRowId) return undefined
+    let cancelled = false
+    setTraversalLoading(true)
+    setTraversalData([])
+    if (selectedTraversal.synthetic) {
+      // Synthetic traversal: fetch a single record by its related ID field
+      if (!onFetchRelatedRecord || !selectedTraversal.fieldValue) {
+        setTraversalLoading(false)
+        return undefined
+      }
+      onFetchRelatedRecord(selectedTraversal.fieldValue)
+        .then((result) => { if (!cancelled) setTraversalData(result?.record ? [result.record] : []) })
+        .catch(() => { if (!cancelled) setTraversalData([]) })
+        .finally(() => { if (!cancelled) setTraversalLoading(false) })
+      return () => { cancelled = true }
+    }
+    if (!onFetchTraversal) {
+      setTraversalLoading(false)
+      return undefined
+    }
+    const row = data?.find((r, i) => (r._id ?? i) === expandedRowId)
+    if (!row) {
+      setTraversalLoading(false)
+      return undefined
+    }
+    onFetchTraversal(row, selectedTraversal.pathTemplate, traversalPage, TRAVERSAL_PAGE_SIZE, {
+      statusFilter: traversalStatusFilter,
+      visibilityFilter: traversalVisibilityFilter,
+      sortField: traversalSortField,
+      sortDir: traversalSortDir,
+    })
+      .then((items) => { if (!cancelled) setTraversalData(Array.isArray(items) ? items : []) })
+      .catch(() => { if (!cancelled) setTraversalData([]) })
+      .finally(() => { if (!cancelled) setTraversalLoading(false) })
+    return () => { cancelled = true }
+  // data intentionally omitted
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTraversal, traversalPage, expandedRowId, onFetchTraversal, traversalRefreshKey, onFetchRelatedRecord, traversalStatusFilter, traversalVisibilityFilter, traversalSortField, traversalSortDir])
+
+  // Click-outside: row-level traversal dropdown
+  useEffect(() => {
+    if (rowTraversalDropdownOpenId === null) return undefined
+    const handler = (e) => {
+      if (rowTraversalDropdownRef.current && !rowTraversalDropdownRef.current.contains(e.target)) {
+        setRowTraversalDropdownOpenId(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [rowTraversalDropdownOpenId])
 
   const shortId = (id) => {
     if (!id) return '—'
@@ -602,6 +1127,26 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                           </button>
                         </div>
                       )
+                      : (col.key === '_entityId' || col.key === '_listId') && row[col.key] && onFetchRelatedRecord
+                      ? (
+                        <button
+                          className="group/rlink text-sky-400 hover:text-sky-200 font-mono text-xs transition-colors"
+                          title={`View related record: ${row[col.key]}`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const relId = row[col.key]
+                            setRelatedRecordModal({ loading: true, record: null, navItem: null, error: null })
+                            onFetchRelatedRecord(relId)
+                              .then((result) => setRelatedRecordModal({ loading: false, record: result?.record ?? null, navItem: result?.navItem ?? null, error: result ? null : 'Record not found' }))
+                              .catch((err) => setRelatedRecordModal({ loading: false, record: null, navItem: null, error: err?.message ?? 'Not found' }))
+                          }}
+                        >
+                          <span className="underline underline-offset-2 group-hover/rlink:no-underline">{shortId(row[col.key])}</span>
+                          <svg className="w-3 h-3 inline-block ml-1 opacity-0 group-hover/rlink:opacity-100 transition-opacity" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                          </svg>
+                        </button>
+                      )
                       : String(row[col.key] ?? '—')}
                 </td>
               ))}
@@ -657,6 +1202,46 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                     </svg>
                   </button>
                 )}
+                {hasTraversals && (
+                  <div className="relative" ref={rowTraversalDropdownOpenId === rowId ? rowTraversalDropdownRef : null}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setRowTraversalDropdownOpenId(rowTraversalDropdownOpenId === rowId ? null : rowId)
+                      }}
+                      className="p-1.5 rounded-lg text-slate-600 hover:text-violet-400 hover:bg-violet-900/30 transition-colors"
+                      title="Browse related items"
+                      aria-label="Browse related items"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                      </svg>
+                    </button>
+                    {rowTraversalDropdownOpenId === rowId && (
+                      <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                        {traversals.map((t) => (
+                          <button
+                            key={t.subResource}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (expandedRowId === rowId) {
+                                setSelectedTraversal(t)
+                                setTraversalPage(0)
+                              } else {
+                                pendingTraversalRef.current = t
+                                setExpandedRowId(rowId)
+                              }
+                              setRowTraversalDropdownOpenId(null)
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {onRowDelete && (
                   <button
                     onClick={(e) => { e.stopPropagation(); setPendingDeleteRow(row) }}
@@ -677,12 +1262,68 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
               <tr className="border-b border-slate-700">
                 <td colSpan={columns.length + 1} className="p-0">
                   <div style={{ position: 'sticky', left: 0, width: containerWidth ?? '100%' }}>
-                    <ManagedFieldsPanel
+                    <ExpandedRowPanel
                       row={row}
+                      fullRecord={fullRecord}
+                      fullRecordLoading={fullRecordLoading}
+                      traversals={traversals}
+                      selectedTraversal={selectedTraversal}
+                      onSelectTraversal={(t) => {
+                        setSelectedTraversal(t)
+                        setTraversalPage(0)
+                        setTraversalStatusFilter(null)
+                        setTraversalVisibilityFilter(null)
+                        setTraversalSortField('')
+                        setTraversalSortDir('ASC')
+                        setTraversalVisibleFields(null)
+                      }}
+                      traversalData={traversalData}
+                      traversalLoading={traversalLoading}
+                      traversalPage={traversalPage}
+                      traversalHasNextPage={traversalData.length === TRAVERSAL_PAGE_SIZE}
+                      onTraversalPrev={() => setTraversalPage((p) => Math.max(0, p - 1))}
+                      onTraversalNext={() => setTraversalPage((p) => p + 1)}
+                      onAddItem={selectedTraversal?.methods?.includes('post') && (onTraversalOpenCreate || onTraversalPost) ? () => {
+                        if (onTraversalOpenCreate) {
+                          onTraversalOpenCreate(expandedRow, selectedTraversal)
+                        } else {
+                          setTraversalActionModal({ type: 'post', body: '{\n  \n}' })
+                        }
+                      } : undefined}
+                      onUpdateAll={selectedTraversal?.methods?.includes('patch') && onTraversalPatchAll ? () => setTraversalActionModal({ type: 'patch', body: '{\n  \n}' }) : undefined}
+                      onDeleteAll={selectedTraversal?.methods?.includes('delete') && onTraversalDeleteAll ? () => setTraversalDeleteAllPending(true) : undefined}
+                      copiedId={copiedId}
+                      onCopyId={(id) => {
+                        navigator.clipboard.writeText(id).catch(() => {})
+                        setCopiedId(id)
+                        if (resetCopyTimerRef.current) clearTimeout(resetCopyTimerRef.current)
+                        resetCopyTimerRef.current = setTimeout(() => setCopiedId(null), 1800)
+                      }}
                       onEdit={onRowClick ? () => onRowClick(row) : undefined}
                       onActivate={onRowActivate ? () => setPendingActivateRow(row) : undefined}
                       onDeactivate={onRowDeactivate && computeRowStatus(row) === 'active' ? () => setPendingDeactivateRow(row) : undefined}
                       onDelete={onRowDelete ? () => setPendingDeleteRow(row) : undefined}
+                      onViewTraversalItem={onFetchRelatedRecord ? (item) => {
+                        const id = item._id ?? item.id
+                        if (id) {
+                          setRelatedRecordModal({ loading: true, record: null, navItem: null, error: null })
+                          onFetchRelatedRecord(id)
+                            .then((result) => setRelatedRecordModal({ loading: false, record: result?.record ?? item, navItem: result?.navItem ?? null, error: null }))
+                            .catch(() => setRelatedRecordModal({ loading: false, record: item, navItem: null, error: null }))
+                        } else {
+                          setRelatedRecordModal({ loading: false, record: item, navItem: null, error: null })
+                        }
+                      } : undefined}
+                      traversalStatusFilter={traversalStatusFilter}
+                      onTraversalStatusFilterChange={(v) => { setTraversalStatusFilter(v); setTraversalPage(0) }}
+                      traversalVisibilityFilter={traversalVisibilityFilter}
+                      onTraversalVisibilityFilterChange={(v) => { setTraversalVisibilityFilter(v); setTraversalPage(0) }}
+                      traversalSortField={traversalSortField}
+                      onTraversalSortFieldChange={(v) => { setTraversalSortField(v); setTraversalPage(0) }}
+                      traversalSortDir={traversalSortDir}
+                      onTraversalSortDirChange={setTraversalSortDir}
+                      traversalVisibleFields={traversalVisibleFields}
+                      onTraversalVisibleFieldsChange={setTraversalVisibleFields}
                     />
                   </div>
                 </td>
@@ -720,6 +1361,138 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
         onConfirm={() => { onRowDeactivate(pendingDeactivateRow); setPendingDeactivateRow(null) }}
         onCancel={() => setPendingDeactivateRow(null)}
       />
+      <ConfirmDialog
+        open={traversalDeleteAllPending}
+        title={`Delete all ${selectedTraversal?.label}?`}
+        message="This will delete all related items in this traversal. This action cannot be undone."
+        confirmLabel="Yes, delete all"
+        confirmVariant="danger"
+        onConfirm={async () => {
+          setTraversalDeleteAllPending(false)
+          if (onTraversalDeleteAll && expandedRow && selectedTraversal) {
+            try { await onTraversalDeleteAll(expandedRow, selectedTraversal.pathTemplate) } catch { /* caller handles errors */ }
+            setTraversalRefreshKey((k) => k + 1)
+          }
+        }}
+        onCancel={() => setTraversalDeleteAllPending(false)}
+      />
+      {traversalActionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setTraversalActionModal(null); setTraversalActionError(null) }} />
+          <div className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+            <div className="p-5 space-y-4">
+              <h3 className="text-sm font-semibold text-slate-100">
+                {traversalActionModal.type === 'post' ? `Add to ${selectedTraversal?.label}` : `Update all ${selectedTraversal?.label}`}
+              </h3>
+              <textarea
+                rows={10}
+                value={traversalActionModal.body}
+                onChange={(e) => setTraversalActionModal((m) => ({ ...m, body: e.target.value }))}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 resize-y focus:outline-none focus:border-blue-600"
+                spellCheck={false}
+                autoFocus
+              />
+              {traversalActionError && <p className="text-xs text-rose-400">{traversalActionError}</p>}
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  onClick={() => { setTraversalActionModal(null); setTraversalActionError(null) }}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={traversalActionLoading}
+                  onClick={async () => {
+                    setTraversalActionLoading(true)
+                    setTraversalActionError(null)
+                    try {
+                      const cb = traversalActionModal.type === 'post' ? onTraversalPost : onTraversalPatchAll
+                      await cb(expandedRow, selectedTraversal.pathTemplate, traversalActionModal.body)
+                      setTraversalActionModal(null)
+                      setTraversalRefreshKey((k) => k + 1)
+                    } catch (err) {
+                      setTraversalActionError(err?.message ?? 'Request failed')
+                    } finally {
+                      setTraversalActionLoading(false)
+                    }
+                  }}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50 transition-colors"
+                >
+                  {traversalActionLoading ? 'Sending…' : 'Send'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Related record modal – opens from _entityId/_listId cell clicks or traversal card edit buttons */}
+      {relatedRecordModal && (
+        relatedRecordModal.navItem && !relatedRecordModal.loading && relatedRecordModal.record ? (
+          <ItemEditModal
+            navItem={relatedRecordModal.navItem}
+            initialRecord={relatedRecordModal.record}
+            api={api}
+            onClose={() => setRelatedRecordModal(null)}
+            onSaved={() => { setTraversalRefreshKey((k) => k + 1) }}
+          />
+        ) : (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setRelatedRecordModal(null)}
+          />
+          <div className="relative z-10 w-full max-w-2xl mx-4 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-900 flex-shrink-0">
+              <div>
+                {relatedRecordModal.record && (
+                  <>
+                    <h3 className="text-sm font-semibold text-slate-100">
+                      {relatedRecordModal.record._name ?? relatedRecordModal.record._kind ?? 'Record'}
+                    </h3>
+                    {relatedRecordModal.record._kind && relatedRecordModal.record._name && (
+                      <span className="text-[11px] text-violet-400 font-mono">{relatedRecordModal.record._kind}</span>
+                    )}
+                  </>
+                )}
+                {!relatedRecordModal.record && !relatedRecordModal.loading && (
+                  <h3 className="text-sm font-semibold text-slate-100">Related Record</h3>
+                )}
+                {relatedRecordModal.loading && (
+                  <h3 className="text-sm font-semibold text-slate-400">Loading…</h3>
+                )}
+              </div>
+              <button
+                onClick={() => setRelatedRecordModal(null)}
+                className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              {relatedRecordModal.loading && (
+                <div className="flex items-center justify-center py-12 gap-2">
+                  <svg className="animate-spin w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  <span className="text-slate-400 text-sm">Fetching record…</span>
+                </div>
+              )}
+              {relatedRecordModal.error && (
+                <div className="p-4 text-rose-400 text-sm">{relatedRecordModal.error}</div>
+              )}
+              {relatedRecordModal.record && (
+                <ManagedFieldsPanel row={relatedRecordModal.record} />
+              )}
+            </div>
+          </div>
+        </div>
+        )
+      )}
     </div>
   )
 }

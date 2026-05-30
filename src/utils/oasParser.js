@@ -158,11 +158,14 @@ export function parseOasSpec(spec) {
           }
         }
 
-        // Traversal: has {param}/subResource, GET
-        if (method === 'get') {
-          const sub = traversalSubResource(pathStr)
-          if (sub && !tagMap[tag].traversals.find((t) => t.subResource === sub)) {
-            tagMap[tag].traversals.push({ subResource: sub, pathTemplate: pathStr })
+        // Traversal: has {param}/subResource — collect all methods
+        const sub = traversalSubResource(pathStr)
+        if (sub) {
+          const existing = tagMap[tag].traversals.find((t) => t.subResource === sub)
+          if (existing) {
+            existing.methods.add(method)
+          } else {
+            tagMap[tag].traversals.push({ subResource: sub, pathTemplate: pathStr, methods: new Set([method]) })
           }
         }
 
@@ -246,6 +249,7 @@ export function parseOasSpec(spec) {
           pathTemplate: tr.pathTemplate,
           parentTag: slugify(t.tag),
           subResource: tr.subResource,
+          methods: ['get', 'post', 'patch', 'delete'].filter((m) => tr.methods.has(m)),
         })),
       })
     })

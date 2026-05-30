@@ -484,6 +484,13 @@ export default function ResourcePage() {
   const isResizing = useRef(false)
   const resizeStartX = useRef(0)
   const resizeStartWidth = useRef(0)
+  // Traversal create modal state
+  const [traversalCreateState, setTraversalCreateState] = useState(null) // null | { row, traversal }
+  const [traversalCreateTab, setTraversalCreateTab] = useState('form')
+  const [traversalCreateFormValues, setTraversalCreateFormValues] = useState({})
+  const [traversalCreatePayload, setTraversalCreatePayload] = useState('{}')
+  const [traversalCreateError, setTraversalCreateError] = useState(null)
+  const [traversalCreating, setTraversalCreating] = useState(false)
 
   const { navItems } = parseOasSpec(oasSpec)
   const navItem = navItems.find((n) => n.id === tagSlug)
@@ -518,6 +525,23 @@ export default function ResourcePage() {
     () => writableFields.filter((f) => f.name.startsWith('_') && f.name !== '_name'),
     [writableFields]
   )
+
+  // Traversal create: writable fields derived from the traversal's POST schema
+  const traversalCreateWritableFields = useMemo(() => {
+    if (!traversalCreateState?.traversal?.pathTemplate) return []
+    const schema = getPostBodySchema(oasSpec, traversalCreateState.traversal.pathTemplate)
+    if (!schema?.properties) return []
+    return Object.entries(schema.properties)
+      .filter(([, prop]) => !prop.readOnly)
+      .map(([name, prop]) => ({
+        name,
+        type: prop.type ?? 'string',
+        format: prop.format ?? null,
+        enum: Array.isArray(prop.enum) ? prop.enum : null,
+        required: Array.isArray(schema.required) && schema.required.includes(name),
+        description: prop.description ?? null,
+      }))
+  }, [oasSpec, traversalCreateState])
 
   const canCreate = navItem?.collectionMethods?.includes('post')
   const canDeleteItem = navItem?.itemPathTemplate && navItem?.itemMethods?.includes('delete')
@@ -672,6 +696,114 @@ export default function ResourcePage() {
     },
     [patch, navItem?.itemPathTemplate, refresh]
   )
+
+  const handleFetchItem = useCallback(async (row) => {
+    const id = row?._id ?? row?.id
+    if (!id || !navItem?.itemPathTemplate) return row
+    return await get(buildItemPath(navItem.itemPathTemplate, id))
+  }, [get, navItem?.itemPathTemplate])
+
+  const handleFetchTraversal = useCallback(async (row, pathTemplate, page, pageSize, filters = {}) => {
+    const id = row?._id ?? row?.id
+    if (!id) return []
+    const resolvedPath = pathTemplate.replace(/\{[^}]+\}/, encodeURIComponent(id))
+    const pKeys = resolvePaginationQueryKeys(oasSpec, pathTemplate, 'get')
+    const qs = new URLSearchParams()
+    qs.set(pKeys.limitKey, String(pageSize))
+    qs.set(pKeys.skipKey, String(page * pageSize))
+    buildSetQuery(qs, filters.statusFilter ? [filters.statusFilter] : [], filters.visibilityFilter ? [filters.visibilityFilter] : [])
+    if (filters.sortField) qs.set('filter[order]', `${filters.sortField} ${filters.sortDir ?? 'ASC'}`)
+    const result = await get(`${resolvedPath}?${qs.toString()}`)
+    return Array.isArray(result) ? result : []
+  }, [get, oasSpec])
+
+  const handleTraversalPost = useCallback(async (row, pathTemplate, body) => {
+    const id = row?._id ?? row?.id
+    if (!id) return
+    const resolvedPath = pathTemplate.replace(/\{[^}]+\}/, encodeURIComponent(id))
+    let parsed
+    try { parsed = JSON.parse(body) } catch { throw new Error('Invalid JSON') }
+    await post(resolvedPath, parsed)
+    await refresh()
+  }, [post, refresh])
+
+  const handleTraversalOpenCreate = useCallback((row, traversal) => {
+    setTraversalCreateState({ row, traversal })
+    setTraversalCreateTab('form')
+    setTraversalCreateFormValues({})
+    setTraversalCreatePayload('{}')
+    setTraversalCreateError(null)
+  }, [])
+
+  const handleTraversalCreate = useCallback(async () => {
+    if (!traversalCreateState) return
+    const { row, traversal } = traversalCreateState
+    const id = row?._id ?? row?.id
+    if (!id) return
+    const resolvedPath = traversal.pathTemplate.replace(/\{[^}]+\}/, encodeURIComponent(id))
+    setTraversalCreateError(null)
+    setTraversalCreating(true)
+    try {
+      const payload = traversalCreateTab === 'form'
+        ? buildPayloadFromForm(traversalCreateFormValues, traversalCreateWritableFields)
+        : JSON.parse(traversalCreatePayload || '{}')
+      await post(resolvedPath, payload)
+      setTraversalCreateState(null)
+      await refresh()
+    } catch (err) {
+      setTraversalCreateError({ message: err?.message ?? 'Create failed', details: err?.body?.error?.details ?? [] })
+    } finally {
+      setTraversalCreating(false)
+    }
+  }, [post, refresh, traversalCreateState, traversalCreateTab, traversalCreateFormValues, traversalCreatePayload, traversalCreateWritableFields])
+
+  const handleTraversalCreateTabSwitch = useCallback((tab) => {
+    if (tab === 'json' && traversalCreateTab !== 'json') {
+      setTraversalCreatePayload(JSON.stringify(buildPayloadFromForm(traversalCreateFormValues, traversalCreateWritableFields), null, 2))
+    } else if (tab === 'form' && traversalCreateTab !== 'form') {
+      try {
+        const parsed = JSON.parse(traversalCreatePayload || '{}')
+        const newValues = {}
+        for (const field of traversalCreateWritableFields) {
+          if (parsed[field.name] !== undefined) {
+            if (field.type === 'array') newValues[field.name] = Array.isArray(parsed[field.name]) ? parsed[field.name] : []
+            else if (field.type === 'object') newValues[field.name] = JSON.stringify(parsed[field.name], null, 2)
+            else newValues[field.name] = String(parsed[field.name])
+          }
+        }
+        setTraversalCreateFormValues(newValues)
+      } catch { /* skip */ }
+    }
+    setTraversalCreateTab(tab)
+  }, [traversalCreateTab, traversalCreateFormValues, traversalCreatePayload, traversalCreateWritableFields])
+
+  const handleTraversalDeleteAll = useCallback(async (row, pathTemplate) => {
+    const id = row?._id ?? row?.id
+    if (!id) return
+    const resolvedPath = pathTemplate.replace(/\{[^}]+\}/, encodeURIComponent(id))
+    await del(resolvedPath)
+  }, [del])
+
+  const handleTraversalPatchAll = useCallback(async (row, pathTemplate, body) => {
+    const id = row?._id ?? row?.id
+    if (!id) return
+    const resolvedPath = pathTemplate.replace(/\{[^}]+\}/, encodeURIComponent(id))
+    let parsed
+    try { parsed = JSON.parse(body) } catch { throw new Error('Invalid JSON') }
+    await patch(resolvedPath, parsed)
+  }, [patch])
+
+  const handleFetchRelatedRecord = useCallback(async (id) => {
+    for (const item of navItems) {
+      if (!item.itemPathTemplate) continue
+      try {
+        const path = item.itemPathTemplate.replace(/\{[^}]+\}/, encodeURIComponent(id))
+        const result = await get(path)
+        if (result && (result._id === id || result.id === id)) return { record: result, navItem: item }
+      } catch { /* try next navItem */ }
+    }
+    return null
+  }, [get, navItems])
 
   const handleSortColumn = useCallback((field) => {
     setSortOrder((prev) => {
@@ -1359,6 +1491,153 @@ export default function ResourcePage() {
         </div>
       )}
 
+      {/* Traversal create modal */}
+      {traversalCreateState && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setTraversalCreateState(null)} />
+          <div className="relative z-10 w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0">
+              <p className="text-sm font-semibold text-slate-200">
+                Add to <span className="text-blue-400">{traversalCreateState.traversal.label}</span>
+              </p>
+              <button
+                onClick={() => setTraversalCreateState(null)}
+                className="flex items-center justify-center w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-white transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Tab bar */}
+            {traversalCreateWritableFields.length > 0 && (
+              <div className="flex border-b border-slate-700 px-4 shrink-0">
+                <button
+                  onClick={() => handleTraversalCreateTabSwitch('form')}
+                  className={`px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
+                    traversalCreateTab === 'form'
+                      ? 'border-blue-500 text-blue-400'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Form
+                </button>
+                <button
+                  onClick={() => handleTraversalCreateTabSwitch('json')}
+                  className={`px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
+                    traversalCreateTab === 'json'
+                      ? 'border-blue-500 text-blue-400'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  JSON
+                </button>
+              </div>
+            )}
+
+            {/* Content */}
+            <div className="p-4 space-y-4 overflow-y-auto">
+
+              {/* Form tab */}
+              {traversalCreateTab === 'form' && traversalCreateWritableFields.length > 0 && (() => {
+                const primaryFields = traversalCreateWritableFields.filter((f) => !f.name.startsWith('_') || f.name === '_name')
+                const managedFields = traversalCreateWritableFields.filter((f) => f.name.startsWith('_') && f.name !== '_name')
+                const nameField = primaryFields.find((f) => f.name === '_name')
+                const otherPrimary = primaryFields.filter((f) => f.name !== '_name')
+                const orderedPrimary = nameField ? [nameField, ...otherPrimary] : otherPrimary
+                return (
+                  <div className="space-y-3">
+                    {orderedPrimary.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                        {orderedPrimary.map((field) => (
+                          <div key={field.name} className="flex flex-col gap-1">
+                            <label className="text-xs text-slate-400 font-mono flex items-center gap-0.5">
+                              {field.name}
+                              {field.required && <span className="text-red-400">*</span>}
+                            </label>
+                            {renderCreateField(
+                              field,
+                              traversalCreateFormValues[field.name],
+                              (v) => setTraversalCreateFormValues((prev) => ({ ...prev, [field.name]: v }))
+                            )}
+                            {field.description && <p className="text-[10px] text-slate-500">{field.description}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {orderedPrimary.length > 0 && managedFields.length > 0 && <hr className="border-slate-700" />}
+                    {managedFields.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                        {managedFields.map((field) => (
+                          <div key={field.name} className="flex flex-col gap-1">
+                            <label className="text-xs text-slate-400 font-mono flex items-center gap-0.5">
+                              {field.name}
+                              {field.required && <span className="text-red-400">*</span>}
+                            </label>
+                            {renderCreateField(
+                              field,
+                              traversalCreateFormValues[field.name],
+                              (v) => setTraversalCreateFormValues((prev) => ({ ...prev, [field.name]: v }))
+                            )}
+                            {field.description && <p className="text-[10px] text-slate-500">{field.description}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* JSON tab (or fallback when no schema) */}
+              {(traversalCreateTab === 'json' || traversalCreateWritableFields.length === 0) && (
+                <textarea
+                  rows={12}
+                  value={traversalCreatePayload}
+                  onChange={(e) => setTraversalCreatePayload(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  spellCheck={false}
+                  autoFocus={traversalCreateWritableFields.length === 0}
+                />
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={handleTraversalCreate}
+                  disabled={traversalCreating}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white"
+                >
+                  {traversalCreating ? 'Creating...' : 'Create'}
+                </button>
+                <button
+                  onClick={() => setTraversalCreateState(null)}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              {/* Validation errors */}
+              {traversalCreateError && (
+                <div className="text-red-400 text-sm space-y-1">
+                  <p>{traversalCreateError.message}</p>
+                  {traversalCreateError.details?.length > 0 && (
+                    <ul className="list-disc list-inside space-y-0.5 text-red-300">
+                      {traversalCreateError.details.map((d, i) => (
+                        <li key={i}>{d.field ? `${d.field}: ${d.message}` : d.message}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <DataGrid
           columns={columns}
@@ -1373,6 +1652,14 @@ export default function ResourcePage() {
           onRowDeactivate={canDeactivate ? handleDeactivateRow : undefined}
           sortOrder={sortOrder}
           onSortColumn={navItem?.hasFilterOrder ? handleSortColumn : undefined}
+          traversals={navItem?.children ?? []}
+          onFetchItem={navItem?.itemPathTemplate ? handleFetchItem : undefined}
+          onFetchTraversal={handleFetchTraversal}
+          onTraversalPost={handleTraversalPost}
+          onTraversalOpenCreate={handleTraversalOpenCreate}
+          onTraversalDeleteAll={handleTraversalDeleteAll}
+          onTraversalPatchAll={handleTraversalPatchAll}
+          onFetchRelatedRecord={handleFetchRelatedRecord}
         />
       </div>
 
