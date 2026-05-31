@@ -491,9 +491,20 @@ export default function ResourcePage() {
   const [traversalCreatePayload, setTraversalCreatePayload] = useState('{}')
   const [traversalCreateError, setTraversalCreateError] = useState(null)
   const [traversalCreating, setTraversalCreating] = useState(false)
+  // List relate modal state
+  const [listRelateState, setListRelateState] = useState(null) // null | { row, traversal }
+  const [listRelateRelation, setListRelateRelation] = useState(null) // selected relation nav item
+  const [listRelateSelectedList, setListRelateSelectedList] = useState(null)
+  const [listRelateSearch, setListRelateSearch] = useState('')
+  const [listRelateResults, setListRelateResults] = useState([])
+  const [listRelateSearchLoading, setListRelateSearchLoading] = useState(false)
+  const [listRelateFormValues, setListRelateFormValues] = useState({})
+  const [listRelating, setListRelating] = useState(false)
+  const [listRelateError, setListRelateError] = useState(null)
+  const listRelateSearchDebounceRef = useRef(null)
 
-  const { navItems } = parseOasSpec(oasSpec)
-  const navItem = navItems.find((n) => n.id === tagSlug)
+  const { navItems } = useMemo(() => parseOasSpec(oasSpec), [oasSpec])
+  const navItem = useMemo(() => navItems.find((n) => n.id === tagSlug), [navItems, tagSlug])
 
   const postSchema = useMemo(
     () => getPostBodySchema(oasSpec, navItem?.collectionPath),
@@ -542,6 +553,40 @@ export default function ResourcePage() {
         description: prop.description ?? null,
       }))
   }, [oasSpec, traversalCreateState])
+
+  // Relation nav items that link entities to lists (have both _entityId and _listId in POST schema)
+  const listRelationNavItems = useMemo(() => {
+    return navItems.filter((ni) => {
+      if (!ni.collectionMethods?.includes('post')) return false
+      const schema = getPostBodySchema(oasSpec, ni.collectionPath)
+      if (!schema?.properties) return false
+      const props = schema.properties
+      return '_entityId' in props && !props._entityId?.readOnly
+        && '_listId' in props && !props._listId?.readOnly
+    })
+  }, [navItems, oasSpec])
+
+  // List nav items for the picker (baseType === 'list' or path includes /lists/)
+  const listNavItemsForPicker = useMemo(() => {
+    return navItems.filter((n) => n.baseType === 'list' || n.collectionPath?.includes('/lists/'))
+  }, [navItems])
+
+  // Writable fields for the selected relation type (excluding _entityId and _listId)
+  const listRelateWritableFields = useMemo(() => {
+    if (!listRelateRelation?.collectionPath) return []
+    const schema = getPostBodySchema(oasSpec, listRelateRelation.collectionPath)
+    if (!schema?.properties) return []
+    return Object.entries(schema.properties)
+      .filter(([name, prop]) => !prop.readOnly && name !== '_entityId' && name !== '_listId')
+      .map(([name, prop]) => ({
+        name,
+        type: prop.type ?? 'string',
+        format: prop.format ?? null,
+        enum: Array.isArray(prop.enum) ? prop.enum : null,
+        required: Array.isArray(schema.required) && schema.required.includes(name),
+        description: prop.description ?? null,
+      }))
+  }, [oasSpec, listRelateRelation])
 
   const canCreate = navItem?.collectionMethods?.includes('post')
   const canDeleteItem = navItem?.itemPathTemplate && navItem?.itemMethods?.includes('delete')
@@ -616,6 +661,38 @@ export default function ResourcePage() {
     }, 350)
     return () => window.clearTimeout(searchDebounceRef.current)
   }, [searchInput])
+
+  // Fetch list results when list relate modal is open or search changes
+  useEffect(() => {
+    if (!listRelateState) return undefined
+    if (listRelateSearchDebounceRef.current) window.clearTimeout(listRelateSearchDebounceRef.current)
+    listRelateSearchDebounceRef.current = window.setTimeout(async () => {
+      if (listNavItemsForPicker.length === 0) return
+      setListRelateSearchLoading(true)
+      try {
+        // Narrow to the list type matching the traversal sub-resource (e.g. 'bookshelves')
+        const sub = listRelateState.traversal?.subResource ?? ''
+        const lastSeg = sub.split('/').pop()
+        const targets = listNavItemsForPicker.filter((ln) =>
+          !lastSeg || ln.collectionPath?.endsWith(`/${lastSeg}`) || ln.collectionPath?.includes(`/${lastSeg}`)
+        )
+        const sources = targets.length > 0 ? targets : listNavItemsForPicker
+        const allResults = []
+        for (const ln of sources) {
+          const qs = new URLSearchParams({ limit: '10' })
+          if (listRelateSearch.trim()) qs.set('s', listRelateSearch.trim())
+          try {
+            const data = await get(`${ln.collectionPath}?${qs}`)
+            if (Array.isArray(data)) allResults.push(...data.map((r) => ({ ...r, _sourceNavItem: ln })))
+          } catch { /* skip */ }
+        }
+        setListRelateResults(allResults)
+      } finally {
+        setListRelateSearchLoading(false)
+      }
+    }, 300)
+    return () => window.clearTimeout(listRelateSearchDebounceRef.current)
+  }, [listRelateState, listRelateSearch, listNavItemsForPicker, get])
 
   const fetcher = useCallback(async () => {
     if (!navItem?.collectionPath) return []
@@ -730,10 +807,17 @@ export default function ResourcePage() {
   const handleTraversalOpenCreate = useCallback((row, traversal) => {
     setTraversalCreateState({ row, traversal })
     setTraversalCreateTab('form')
-    setTraversalCreateFormValues({})
-    setTraversalCreatePayload('{}')
+    const schema = getPostBodySchema(oasSpec, traversal.pathTemplate)
+    const rowId = row?._id ?? row?.id
+    const initialValues = {}
+    if (schema?.properties && rowId) {
+      if ('_entityId' in schema.properties && !schema.properties._entityId.readOnly) initialValues._entityId = rowId
+      if ('_listId' in schema.properties && !schema.properties._listId.readOnly) initialValues._listId = rowId
+    }
+    setTraversalCreateFormValues(initialValues)
+    setTraversalCreatePayload(Object.keys(initialValues).length ? JSON.stringify(initialValues, null, 2) : '{}')
     setTraversalCreateError(null)
-  }, [])
+  }, [oasSpec])
 
   const handleTraversalCreate = useCallback(async () => {
     if (!traversalCreateState) return
@@ -792,6 +876,38 @@ export default function ResourcePage() {
     try { parsed = JSON.parse(body) } catch { throw new Error('Invalid JSON') }
     await patch(resolvedPath, parsed)
   }, [patch])
+
+  const handleTraversalRelateToList = useCallback((row, traversal) => {
+    const autoRelation = listRelationNavItems.length === 1 ? listRelationNavItems[0] : null
+    setListRelateState({ row, traversal })
+    setListRelateRelation(autoRelation)
+    setListRelateSelectedList(null)
+    setListRelateSearch('')
+    setListRelateResults([])
+    setListRelateFormValues({})
+    setListRelateError(null)
+  }, [listRelationNavItems])
+
+  const handleListRelateSubmit = useCallback(async () => {
+    if (!listRelateState || !listRelateRelation || !listRelateSelectedList) return
+    const rowId = listRelateState.row?._id ?? listRelateState.row?.id
+    const listId = listRelateSelectedList._id ?? listRelateSelectedList.id
+    const payload = {
+      ...buildPayloadFromForm(listRelateFormValues, listRelateWritableFields),
+      _entityId: rowId,
+      _listId: listId,
+    }
+    setListRelating(true)
+    setListRelateError(null)
+    try {
+      await post(listRelateRelation.collectionPath, payload)
+      setListRelateState(null)
+    } catch (err) {
+      setListRelateError({ message: err?.message ?? 'Failed to create relation', details: err?.body?.error?.details ?? [] })
+    } finally {
+      setListRelating(false)
+    }
+  }, [post, listRelateState, listRelateRelation, listRelateSelectedList, listRelateFormValues, listRelateWritableFields])
 
   const handleFetchRelatedRecord = useCallback(async (id) => {
     for (const item of navItems) {
@@ -1638,6 +1754,170 @@ export default function ResourcePage() {
         </div>
       )}
 
+      {/* List relate modal */}
+      {listRelateState && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setListRelateState(null)} />
+          <div className="relative z-10 w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0">
+              <div>
+                <p className="text-sm font-semibold text-slate-200">Relate to existing list</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">via <span className="text-slate-400">{listRelateState.traversal.label}</span></p>
+              </div>
+              <button
+                onClick={() => setListRelateState(null)}
+                className="flex items-center justify-center w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-white transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="px-4 pb-4 space-y-4 overflow-y-auto">
+
+              {/* Relationship type selector (shown only when multiple options exist) */}
+              {listRelationNavItems.length > 1 && (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Relationship type</p>
+                  <div className="flex flex-wrap gap-2">
+                    {listRelationNavItems.map((ri) => (
+                      <button
+                        key={ri.id}
+                        onClick={() => { setListRelateRelation(ri); setListRelateFormValues({}) }}
+                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                          listRelateRelation?.id === ri.id
+                            ? 'bg-blue-700 border-blue-500 text-white'
+                            : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+                        }`}
+                      >
+                        {ri.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* List picker */}
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                  Select list
+                  {listRelateSelectedList && (
+                    <span className="ml-2 normal-case font-normal text-emerald-400">
+                      ✓ {listRelateSelectedList._name ?? listRelateSelectedList._id}
+                    </span>
+                  )}
+                </p>
+                <div className="relative">
+                  <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={listRelateSearch}
+                    onChange={(e) => setListRelateSearch(e.target.value)}
+                    placeholder="Search by name…"
+                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="rounded-lg border border-slate-700 overflow-hidden max-h-40 overflow-y-auto">
+                  {listRelateSearchLoading && (
+                    <div className="flex items-center justify-center py-6 text-slate-500 text-xs">Loading…</div>
+                  )}
+                  {!listRelateSearchLoading && listRelateResults.length === 0 && (
+                    <div className="flex items-center justify-center py-6 text-slate-500 text-xs">No results</div>
+                  )}
+                  {!listRelateSearchLoading && listRelateResults.map((r) => {
+                    const id = r._id ?? r.id
+                    const isSelected = (listRelateSelectedList?._id ?? listRelateSelectedList?.id) === id
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => setListRelateSelectedList(r)}
+                        className={`w-full text-left flex items-center justify-between px-3 py-2 text-xs border-b border-slate-800 last:border-0 transition-colors ${
+                          isSelected ? 'bg-blue-900/40 text-blue-300' : 'hover:bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        <span className="font-mono truncate">{r._name ?? id}</span>
+                        <span className="shrink-0 ml-2 text-[10px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">{r._sourceNavItem?.label ?? ''}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Auto-filled IDs preview */}
+              {(listRelateState.row || listRelateSelectedList) && (
+                <div className="flex gap-3 text-[10px] font-mono text-slate-500">
+                  <span>_entityId: <span className="text-slate-300">{listRelateState.row?._id ?? listRelateState.row?.id ?? '—'}</span></span>
+                  <span>_listId: <span className={listRelateSelectedList ? 'text-emerald-400' : 'text-slate-600'}>{listRelateSelectedList?._id ?? listRelateSelectedList?.id ?? '—'}</span></span>
+                </div>
+              )}
+
+              {/* Extra relation fields */}
+              {listRelateRelation && listRelateWritableFields.length > 0 && (
+                <>
+                  <hr className="border-slate-700" />
+                  <div className="space-y-1.5">
+                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Relationship details</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                      {listRelateWritableFields.map((field) => (
+                        <div key={field.name} className="flex flex-col gap-1">
+                          <label className="text-xs text-slate-400 font-mono flex items-center gap-0.5">
+                            {field.name}
+                            {field.required && <span className="text-red-400">*</span>}
+                          </label>
+                          {renderCreateField(
+                            field,
+                            listRelateFormValues[field.name],
+                            (v) => setListRelateFormValues((prev) => ({ ...prev, [field.name]: v }))
+                          )}
+                          {field.description && <p className="text-[10px] text-slate-500">{field.description}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={handleListRelateSubmit}
+                  disabled={listRelating || !listRelateRelation || !listRelateSelectedList}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white"
+                >
+                  {listRelating ? 'Saving…' : 'Save relation'}
+                </button>
+                <button
+                  onClick={() => setListRelateState(null)}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              {/* Error */}
+              {listRelateError && (
+                <div className="text-red-400 text-sm space-y-1">
+                  <p>{listRelateError.message}</p>
+                  {listRelateError.details?.length > 0 && (
+                    <ul className="list-disc list-inside space-y-0.5 text-red-300">
+                      {listRelateError.details.map((d, i) => (
+                        <li key={i}>{d.field ? `${d.field}: ${d.message}` : d.message}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <DataGrid
           columns={columns}
@@ -1660,6 +1940,7 @@ export default function ResourcePage() {
           onTraversalDeleteAll={handleTraversalDeleteAll}
           onTraversalPatchAll={handleTraversalPatchAll}
           onFetchRelatedRecord={handleFetchRelatedRecord}
+          onTraversalRelateToList={listRelationNavItems.length > 0 ? handleTraversalRelateToList : undefined}
         />
       </div>
 

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import ConfirmDialog from './ConfirmDialog'
 import ItemEditModal from './ItemEditModal'
 import { useApiClient } from '../../services/apiClient'
@@ -775,7 +775,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -786,8 +786,15 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const [pendingActivateRow, setPendingActivateRow] = useState(null)
   const [pendingDeactivateRow, setPendingDeactivateRow] = useState(null)
   const [actionsExpanded, setActionsExpanded] = useState(false)
-  const scrollContainerRef = useRef(null)
-  const [containerWidth, setContainerWidth] = useState(null)
+  const scrollRoRef = useRef(null)
+  const scrollContainerRef = useCallback((el) => {
+    if (scrollRoRef.current) { scrollRoRef.current.disconnect(); scrollRoRef.current = null }
+    if (!el) return
+    el.style.setProperty('--cw', el.clientWidth + 'px')
+    const ro = new ResizeObserver(() => el.style.setProperty('--cw', el.clientWidth + 'px'))
+    ro.observe(el)
+    scrollRoRef.current = ro
+  }, [])
 
   // Traversal / full-record expansion state
   const [fullRecord, setFullRecord] = useState(null)
@@ -817,14 +824,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
 
   const actionColWidth = Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate, hasTraversals ? true : null].filter(Boolean).length * 36)
 
-  useEffect(() => {
-    const el = scrollContainerRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setContainerWidth(el.clientWidth))
-    ro.observe(el)
-    setContainerWidth(el.clientWidth)
-    return () => ro.disconnect()
-  }, [])
+
 
   // Reset expansion state when the expanded row changes
   useEffect(() => {
@@ -1259,9 +1259,9 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
               </td>
             </tr>
             {isExpanded && (
-              <tr className="border-b border-slate-700">
-                <td colSpan={columns.length + 1} className="p-0">
-                  <div style={{ position: 'sticky', left: 0, width: containerWidth ?? '100%' }}>
+              <tr>
+                <td colSpan={columns.length + 1} className="p-0 border-b border-slate-700">
+                  <div style={{ position: 'sticky', left: 0, width: 'var(--cw, 100%)' }}>
                     <ExpandedRowPanel
                       row={row}
                       fullRecord={fullRecord}
@@ -1283,13 +1283,17 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       traversalHasNextPage={traversalData.length === TRAVERSAL_PAGE_SIZE}
                       onTraversalPrev={() => setTraversalPage((p) => Math.max(0, p - 1))}
                       onTraversalNext={() => setTraversalPage((p) => p + 1)}
-                      onAddItem={selectedTraversal?.methods?.includes('post') && (onTraversalOpenCreate || onTraversalPost) ? () => {
-                        if (onTraversalOpenCreate) {
-                          onTraversalOpenCreate(expandedRow, selectedTraversal)
-                        } else {
-                          setTraversalActionModal({ type: 'post', body: '{\n  \n}' })
-                        }
-                      } : undefined}
+                      onAddItem={selectedTraversal?.methods?.includes('post') && (onTraversalOpenCreate || onTraversalPost)
+                        ? () => {
+                            if (onTraversalOpenCreate) {
+                              onTraversalOpenCreate(expandedRow, selectedTraversal)
+                            } else {
+                              setTraversalActionModal({ type: 'post', body: '{\n  \n}' })
+                            }
+                          }
+                        : (onTraversalRelateToList && selectedTraversal?.pathTemplate?.includes('/lists/'))
+                          ? () => onTraversalRelateToList(expandedRow, selectedTraversal)
+                          : undefined}
                       onUpdateAll={selectedTraversal?.methods?.includes('patch') && onTraversalPatchAll ? () => setTraversalActionModal({ type: 'patch', body: '{\n  \n}' }) : undefined}
                       onDeleteAll={selectedTraversal?.methods?.includes('delete') && onTraversalDeleteAll ? () => setTraversalDeleteAllPending(true) : undefined}
                       copiedId={copiedId}
