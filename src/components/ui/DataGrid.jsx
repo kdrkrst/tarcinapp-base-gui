@@ -775,7 +775,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList, externalRefreshKey = 0, relateTraversalIds = null }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -892,7 +892,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
     return () => { cancelled = true }
   // data intentionally omitted
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTraversal, traversalPage, expandedRowId, onFetchTraversal, traversalRefreshKey, onFetchRelatedRecord, traversalStatusFilter, traversalVisibilityFilter, traversalSortField, traversalSortDir])
+  }, [selectedTraversal, traversalPage, expandedRowId, onFetchTraversal, traversalRefreshKey, externalRefreshKey, onFetchRelatedRecord, traversalStatusFilter, traversalVisibilityFilter, traversalSortField, traversalSortDir])
 
   // Click-outside: row-level traversal dropdown
   useEffect(() => {
@@ -1283,17 +1283,19 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       traversalHasNextPage={traversalData.length === TRAVERSAL_PAGE_SIZE}
                       onTraversalPrev={() => setTraversalPage((p) => Math.max(0, p - 1))}
                       onTraversalNext={() => setTraversalPage((p) => p + 1)}
-                      onAddItem={selectedTraversal?.methods?.includes('post') && (onTraversalOpenCreate || onTraversalPost)
-                        ? () => {
-                            if (onTraversalOpenCreate) {
-                              onTraversalOpenCreate(expandedRow, selectedTraversal)
-                            } else {
-                              setTraversalActionModal({ type: 'post', body: '{\n  \n}' })
-                            }
-                          }
-                        : (onTraversalRelateToList && selectedTraversal?.pathTemplate?.includes('/lists/'))
+                      onAddItem={
+                        (onTraversalRelateToList && relateTraversalIds?.has(selectedTraversal?.pathTemplate))
                           ? () => onTraversalRelateToList(expandedRow, selectedTraversal)
-                          : undefined}
+                          : selectedTraversal?.methods?.includes('post') && (onTraversalOpenCreate || onTraversalPost)
+                            ? () => {
+                                if (onTraversalOpenCreate) {
+                                  onTraversalOpenCreate(expandedRow, selectedTraversal)
+                                } else {
+                                  setTraversalActionModal({ type: 'post', body: '{\n  \n}' })
+                                }
+                              }
+                            : undefined
+                      }
                       onUpdateAll={selectedTraversal?.methods?.includes('patch') && onTraversalPatchAll ? () => setTraversalActionModal({ type: 'patch', body: '{\n  \n}' }) : undefined}
                       onDeleteAll={selectedTraversal?.methods?.includes('delete') && onTraversalDeleteAll ? () => setTraversalDeleteAllPending(true) : undefined}
                       copiedId={copiedId}

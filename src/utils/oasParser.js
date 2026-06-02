@@ -192,21 +192,38 @@ export function parseOasSpec(spec) {
       const collectionGetParams = Array.isArray(spec?.paths?.[t.collectionPath]?.get?.parameters)
         ? spec.paths[t.collectionPath].get.parameters
         : []
-      const hasSearch = collectionGetParams.some((p) => p?.name === 's' && p?.in === 'query')
+      // Simplified search: gateway translates ?s=value to filter[where][_name][regexp]=.*value.*
+      const hasSimplifiedSearch = collectionGetParams.some((p) => p?.name === 's' && p?.in === 'query')
 
       const itemSchema = getCollectionItemSchema(spec, t.collectionPath)
       const schemaProps = itemSchema?.properties ?? {}
       const hasValidityDates = '_validFromDateTime' in schemaProps || '_validUntilDateTime' in schemaProps
 
-      // Detect filter[fields] capability: filter param with deepObject style that has a `fields` property
+      // Detect filter deepObject: covers filter[where], filter[fields], filter[order], filter[limit], filter[skip]
       const filterParam = collectionGetParams.find(
         (p) => p?.name === 'filter' && p?.in === 'query' && p?.style === 'deepObject'
       )
       const hasFilterFields = !!(filterParam?.schema?.properties?.fields)
       const hasFilterOrder = !!(filterParam?.schema?.properties?.order)
+      // filter[where] is the base fallback for search when ?s= is not available
+      const hasFilterWhere = !!(filterParam?.schema?.properties?.where)
+      // search box is shown when either the simplified ?s= or the base filter[where] is declared
+      const hasSearch = hasSimplifiedSearch || hasFilterWhere
+
+      // Pagination: prefer native ?limit=/?skip=; fall back to filter[limit]/filter[skip]
+      const hasNativeLimit = collectionGetParams.some((p) => p?.name === 'limit' && p?.in === 'query')
+      const hasFilterLimit = !!(filterParam?.schema?.properties?.limit)
+      // hasPagination: false only when neither form is declared in the spec
+      const hasPagination = hasNativeLimit || hasFilterLimit
 
       const hasFieldset = collectionGetParams.some((p) => p?.name === 'fieldset' && p?.in === 'query')
       const hasFields = collectionGetParams.some((p) => p?.name === 'fields' && p?.in === 'query')
+
+      // Detect set parameter capability: deepObject query param named 'set'
+      const setParam = collectionGetParams.find(
+        (p) => p?.name === 'set' && p?.in === 'query' && p?.style === 'deepObject'
+      )
+      const hasSet = !!setParam
 
       // Detect q parameter and its enum values
       const qParam = collectionGetParams.find((p) => p?.name === 'q' && p?.in === 'query')
@@ -230,7 +247,11 @@ export function parseOasSpec(spec) {
       collectionPath: t.collectionPath,
       collectionMethods: ['get', 'post', 'patch', 'put', 'delete'].filter((m) => t.collectionMethods.has(m)),
         hasSearch,
+        hasSimplifiedSearch,
+        hasFilterWhere,
+        hasPagination,
         hasValidityDates,
+        hasSet,
         hasFilterFields,
         hasFilterOrder,
         hasFieldset,

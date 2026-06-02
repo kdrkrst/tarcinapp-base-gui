@@ -498,10 +498,13 @@ export default function ResourcePage() {
   const [listRelateSearch, setListRelateSearch] = useState('')
   const [listRelateResults, setListRelateResults] = useState([])
   const [listRelateSearchLoading, setListRelateSearchLoading] = useState(false)
+  const [listRelatePage, setListRelatePage] = useState(0)
+  const [listRelateHasMore, setListRelateHasMore] = useState(false)
   const [listRelateFormValues, setListRelateFormValues] = useState({})
   const [listRelating, setListRelating] = useState(false)
   const [listRelateError, setListRelateError] = useState(null)
   const listRelateSearchDebounceRef = useRef(null)
+  const [traversalRefreshSignal, setTraversalRefreshSignal] = useState(0)
 
   const { navItems } = useMemo(() => parseOasSpec(oasSpec), [oasSpec])
   const navItem = useMemo(() => navItems.find((n) => n.id === tagSlug), [navItems, tagSlug])
@@ -571,6 +574,32 @@ export default function ResourcePage() {
     return navItems.filter((n) => n.baseType === 'list' || n.collectionPath?.includes('/lists/'))
   }, [navItems])
 
+  // Entity nav items for the picker (baseType === 'entity' or not a list/relation)
+  const entityNavItemsForPicker = useMemo(() => {
+    return navItems.filter((n) => n.baseType === 'entity' || (!n.baseType && n.collectionPath && !n.collectionPath.includes('/lists/')))
+  }, [navItems])
+
+  // Set of traversal pathTemplates on the current resource that should show the relate modal.
+  // Three cases:
+  //  1. subResource last-seg matches a known relation type (e.g. 'contains')
+  //  2. path includes '/lists/'  → entity page, pick a list
+  //  3. path includes '/entities/' → list page, pick an entity
+  const relateTraversalIds = useMemo(() => {
+    if (!navItem?.children) return new Set()
+    const relationLastSegs = new Set(listRelationNavItems.map((ni) => {
+      const parts = (ni.collectionPath ?? '').split('/').filter(Boolean)
+      return parts[parts.length - 1]
+    }).filter(Boolean))
+    return new Set((navItem.children ?? []).filter((t) => {
+      const lastSeg = (t.subResource ?? '').split('/').pop()
+      if (listRelationNavItems.length > 0 && relationLastSegs.has(lastSeg)) return true
+      // Use subResource prefix — 'lists/bookshelves' starts with 'lists/', 'reactions/likes' does not
+      if (listNavItemsForPicker.length > 0 && t.subResource?.startsWith('lists/')) return true
+      if (entityNavItemsForPicker.length > 0 && t.subResource?.startsWith('entities/')) return true
+      return false
+    }).map((t) => t.pathTemplate))
+  }, [navItem, listRelationNavItems, listNavItemsForPicker, entityNavItemsForPicker])
+
   // Writable fields for the selected relation type (excluding _entityId and _listId)
   const listRelateWritableFields = useMemo(() => {
     if (!listRelateRelation?.collectionPath) return []
@@ -609,7 +638,10 @@ export default function ResourcePage() {
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildSetQuery(qs, statusSelections, visibilitySelections)
-    if (debouncedSearch) qs.set('s', debouncedSearch)
+    if (debouncedSearch) {
+      if (navItem?.hasSimplifiedSearch) qs.set('s', debouncedSearch)
+      else qs.set('filter[where][_name][regexp]', `.*${debouncedSearch}.*`)
+    }
     if (selectedQ) qs.set('q', selectedQ)
     if (selectedFieldset) qs.set('fieldset', selectedFieldset)
     buildFilterFieldsParams(qs, fieldSelectorState)
@@ -662,37 +694,55 @@ export default function ResourcePage() {
     return () => window.clearTimeout(searchDebounceRef.current)
   }, [searchInput])
 
-  // Fetch list results when list relate modal is open or search changes
+  // Fetch list/entity results when the relate modal is open or search changes
   useEffect(() => {
     if (!listRelateState) return undefined
     if (listRelateSearchDebounceRef.current) window.clearTimeout(listRelateSearchDebounceRef.current)
     listRelateSearchDebounceRef.current = window.setTimeout(async () => {
-      if (listNavItemsForPicker.length === 0) return
+      const mode = listRelateState.mode ?? 'list-pick'
+      const pickerItems = mode === 'entity-pick' ? entityNavItemsForPicker : listNavItemsForPicker
+      if (pickerItems.length === 0) return
       setListRelateSearchLoading(true)
       try {
-        // Narrow to the list type matching the traversal sub-resource (e.g. 'bookshelves')
-        const sub = listRelateState.traversal?.subResource ?? ''
-        const lastSeg = sub.split('/').pop()
-        const targets = listNavItemsForPicker.filter((ln) =>
-          !lastSeg || ln.collectionPath?.endsWith(`/${lastSeg}`) || ln.collectionPath?.includes(`/${lastSeg}`)
-        )
-        const sources = targets.length > 0 ? targets : listNavItemsForPicker
+        let sources
+        if (mode === 'entity-pick') {
+          // Narrow entity type by traversal subResource last segment (e.g. 'books' from 'entities/books')
+          const sub = listRelateState.traversal?.subResource ?? ''
+          const lastSeg = sub.split('/').pop()
+          const targets = pickerItems.filter((ln) =>
+            !lastSeg || ln.collectionPath?.endsWith(`/${lastSeg}`) || ln.collectionPath?.includes(`/${lastSeg}`)
+          )
+          sources = targets.length > 0 ? targets : pickerItems
+        } else {
+          // Narrow list type by traversal subResource last segment (e.g. 'bookshelves' from 'lists/bookshelves')
+          const sub = listRelateState.traversal?.subResource ?? ''
+          const lastSeg = sub.split('/').pop()
+          const targets = pickerItems.filter((ln) =>
+            !lastSeg || ln.collectionPath?.endsWith(`/${lastSeg}`) || ln.collectionPath?.includes(`/${lastSeg}`)
+          )
+          sources = targets.length > 0 ? targets : pickerItems
+        }
+        const PICKER_PAGE_SIZE = 5
         const allResults = []
         for (const ln of sources) {
-          const qs = new URLSearchParams({ limit: '10' })
+          const keys = resolvePaginationQueryKeys(oasSpec, ln.collectionPath, 'get')
+          const qs = new URLSearchParams({ [keys.limitKey]: String(PICKER_PAGE_SIZE + 1) })
+          qs.set(keys.skipKey, String(listRelatePage * PICKER_PAGE_SIZE))
           if (listRelateSearch.trim()) qs.set('s', listRelateSearch.trim())
           try {
             const data = await get(`${ln.collectionPath}?${qs}`)
             if (Array.isArray(data)) allResults.push(...data.map((r) => ({ ...r, _sourceNavItem: ln })))
           } catch { /* skip */ }
         }
-        setListRelateResults(allResults)
+        const hasMore = allResults.length > PICKER_PAGE_SIZE
+        setListRelateHasMore(hasMore)
+        setListRelateResults(hasMore ? allResults.slice(0, PICKER_PAGE_SIZE) : allResults)
       } finally {
         setListRelateSearchLoading(false)
       }
     }, 300)
     return () => window.clearTimeout(listRelateSearchDebounceRef.current)
-  }, [listRelateState, listRelateSearch, listNavItemsForPicker, get])
+  }, [listRelateState, listRelateSearch, listRelatePage, listNavItemsForPicker, entityNavItemsForPicker, oasSpec, get])
 
   const fetcher = useCallback(async () => {
     if (!navItem?.collectionPath) return []
@@ -701,7 +751,10 @@ export default function ResourcePage() {
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildSetQuery(qs, statusSelections, visibilitySelections)
-    if (debouncedSearch) qs.set('s', debouncedSearch)
+    if (debouncedSearch) {
+      if (navItem?.hasSimplifiedSearch) qs.set('s', debouncedSearch)
+      else qs.set('filter[where][_name][regexp]', `.*${debouncedSearch}.*`)
+    }
     if (selectedQ) qs.set('q', selectedQ)
     if (selectedFieldset) qs.set('fieldset', selectedFieldset)
     buildFilterFieldsParams(qs, fieldSelectorState)
@@ -828,7 +881,7 @@ export default function ResourcePage() {
     setTraversalCreateError(null)
     setTraversalCreating(true)
     try {
-      const payload = traversalCreateTab === 'form'
+      const payload = (traversalCreateTab === 'form' && traversalCreateWritableFields.length > 0)
         ? buildPayloadFromForm(traversalCreateFormValues, traversalCreateWritableFields)
         : JSON.parse(traversalCreatePayload || '{}')
       await post(resolvedPath, payload)
@@ -878,30 +931,43 @@ export default function ResourcePage() {
   }, [patch])
 
   const handleTraversalRelateToList = useCallback((row, traversal) => {
-    const autoRelation = listRelationNavItems.length === 1 ? listRelationNavItems[0] : null
-    setListRelateState({ row, traversal })
+    // Narrow relation types to those whose collection path matches the traversal sub-resource
+    const lastSeg = (traversal.subResource ?? '').split('/').pop()
+    const matchingRelations = listRelationNavItems.filter((ni) => {
+      const niSeg = (ni.collectionPath ?? '').split('/').filter(Boolean).pop() ?? ''
+      return !lastSeg || niSeg === lastSeg
+    })
+    const relevantRelations = matchingRelations.length > 0 ? matchingRelations : listRelationNavItems
+    const autoRelation = relevantRelations.length === 1 ? relevantRelations[0] : null
+    // Detect mode: if the current resource is a list, we need to pick an entity; otherwise pick a list
+    const mode = navItem?.baseType === 'list' ? 'entity-pick' : 'list-pick'
+    setListRelateState({ row, traversal, mode, relevantRelations })
     setListRelateRelation(autoRelation)
     setListRelateSelectedList(null)
     setListRelateSearch('')
     setListRelateResults([])
     setListRelateFormValues({})
     setListRelateError(null)
-  }, [listRelationNavItems])
+    setListRelatePage(0)
+    setListRelateHasMore(false)
+  }, [listRelationNavItems, navItem])
 
   const handleListRelateSubmit = useCallback(async () => {
     if (!listRelateState || !listRelateRelation || !listRelateSelectedList) return
     const rowId = listRelateState.row?._id ?? listRelateState.row?.id
-    const listId = listRelateSelectedList._id ?? listRelateSelectedList.id
+    const pickedId = listRelateSelectedList._id ?? listRelateSelectedList.id
+    const mode = listRelateState.mode ?? 'list-pick'
     const payload = {
       ...buildPayloadFromForm(listRelateFormValues, listRelateWritableFields),
-      _entityId: rowId,
-      _listId: listId,
+      _entityId: mode === 'list-pick' ? rowId : pickedId,
+      _listId: mode === 'list-pick' ? pickedId : rowId,
     }
     setListRelating(true)
     setListRelateError(null)
     try {
       await post(listRelateRelation.collectionPath, payload)
       setListRelateState(null)
+      setTraversalRefreshSignal((k) => k + 1)
     } catch (err) {
       setListRelateError({ message: err?.message ?? 'Failed to create relation', details: err?.body?.error?.details ?? [] })
     } finally {
@@ -1267,7 +1333,7 @@ export default function ResourcePage() {
               </div>
             )}
 
-            {navItem.hasValidityDates && (
+            {navItem.hasSet && navItem.hasValidityDates && (
               <div className="space-y-1.5">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Status</p>
                 <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
@@ -1289,6 +1355,7 @@ export default function ResourcePage() {
               </div>
             )}
 
+            {navItem.hasSet && (
             <div className="space-y-1.5">
               <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Visibility</p>
               <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
@@ -1308,6 +1375,7 @@ export default function ResourcePage() {
                 })}
               </div>
             </div>
+            )}
           </div>
 
           {/* Column selector */}
@@ -1655,7 +1723,7 @@ export default function ResourcePage() {
             )}
 
             {/* Content */}
-            <div className="p-4 space-y-4 overflow-y-auto">
+            <div className="p-4 space-y-4 overflow-y-auto flex-1">
 
               {/* Form tab */}
               {traversalCreateTab === 'form' && traversalCreateWritableFields.length > 0 && (() => {
@@ -1719,8 +1787,25 @@ export default function ResourcePage() {
                 />
               )}
 
+            </div>
+
+            {/* Sticky footer: error + actions */}
+            <div className="px-4 pb-4 pt-3 space-y-3 shrink-0 border-t border-slate-700/50">
+              {/* Validation errors */}
+              {traversalCreateError && (
+                <div className="text-red-400 text-sm space-y-1">
+                  <p>{traversalCreateError.message}</p>
+                  {traversalCreateError.details?.length > 0 && (
+                    <ul className="list-disc list-inside space-y-0.5 text-red-300">
+                      {traversalCreateError.details.map((d, i) => (
+                        <li key={i}>{d.path ? `${d.path}: ${d.message}` : d.field ? `${d.field}: ${d.message}` : d.message}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {/* Actions */}
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={handleTraversalCreate}
                   disabled={traversalCreating}
@@ -1735,26 +1820,12 @@ export default function ResourcePage() {
                   Cancel
                 </button>
               </div>
-
-              {/* Validation errors */}
-              {traversalCreateError && (
-                <div className="text-red-400 text-sm space-y-1">
-                  <p>{traversalCreateError.message}</p>
-                  {traversalCreateError.details?.length > 0 && (
-                    <ul className="list-disc list-inside space-y-0.5 text-red-300">
-                      {traversalCreateError.details.map((d, i) => (
-                        <li key={i}>{d.field ? `${d.field}: ${d.message}` : d.message}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* List relate modal */}
+      {/* Relate modal (bidirectional: entity→pick list, or list→pick entity) */}
       {listRelateState && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setListRelateState(null)} />
@@ -1762,7 +1833,9 @@ export default function ResourcePage() {
             {/* Header */}
             <div className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0">
               <div>
-                <p className="text-sm font-semibold text-slate-200">Relate to existing list</p>
+                <p className="text-sm font-semibold text-slate-200">
+                  {listRelateState.mode === 'entity-pick' ? 'Add entity to list' : 'Relate to existing list'}
+                </p>
                 <p className="text-[11px] text-slate-500 mt-0.5">via <span className="text-slate-400">{listRelateState.traversal.label}</span></p>
               </div>
               <button
@@ -1776,15 +1849,15 @@ export default function ResourcePage() {
               </button>
             </div>
 
-            {/* Content */}
-            <div className="px-4 pb-4 space-y-4 overflow-y-auto">
+            {/* Scrollable content */}
+            <div className="px-4 pt-2 pb-2 space-y-4 overflow-y-auto flex-1">
 
               {/* Relationship type selector (shown only when multiple options exist) */}
-              {listRelationNavItems.length > 1 && (
+              {(listRelateState.relevantRelations ?? listRelationNavItems).length > 1 && (
                 <div className="space-y-1.5">
                   <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Relationship type</p>
                   <div className="flex flex-wrap gap-2">
-                    {listRelationNavItems.map((ri) => (
+                    {(listRelateState.relevantRelations ?? listRelationNavItems).map((ri) => (
                       <button
                         key={ri.id}
                         onClick={() => { setListRelateRelation(ri); setListRelateFormValues({}) }}
@@ -1801,10 +1874,10 @@ export default function ResourcePage() {
                 </div>
               )}
 
-              {/* List picker */}
+              {/* Item picker (entity or list depending on mode) */}
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
-                  Select list
+                  {listRelateState.mode === 'entity-pick' ? 'Select entity' : 'Select list'}
                   {listRelateSelectedList && (
                     <span className="ml-2 normal-case font-normal text-emerald-400">
                       ✓ {listRelateSelectedList._name ?? listRelateSelectedList._id}
@@ -1818,12 +1891,12 @@ export default function ResourcePage() {
                   <input
                     type="text"
                     value={listRelateSearch}
-                    onChange={(e) => setListRelateSearch(e.target.value)}
+                    onChange={(e) => { setListRelateSearch(e.target.value); setListRelatePage(0) }}
                     placeholder="Search by name…"
                     className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-950 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
-                <div className="rounded-lg border border-slate-700 overflow-hidden max-h-40 overflow-y-auto">
+                <div className="rounded-lg border border-slate-700 overflow-hidden">
                   {listRelateSearchLoading && (
                     <div className="flex items-center justify-center py-6 text-slate-500 text-xs">Loading…</div>
                   )}
@@ -1847,13 +1920,38 @@ export default function ResourcePage() {
                     )
                   })}
                 </div>
+                {/* Picker pagination */}
+                {(listRelatePage > 0 || listRelateHasMore) && (
+                  <div className="flex items-center justify-between pt-1.5">
+                    <button
+                      onClick={() => setListRelatePage((p) => Math.max(0, p - 1))}
+                      disabled={listRelatePage === 0}
+                      className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >← Prev</button>
+                    <span className="text-[10px] text-slate-500">Page {listRelatePage + 1}</span>
+                    <button
+                      onClick={() => setListRelatePage((p) => p + 1)}
+                      disabled={!listRelateHasMore}
+                      className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >Next →</button>
+                  </div>
+                )}
               </div>
 
               {/* Auto-filled IDs preview */}
               {(listRelateState.row || listRelateSelectedList) && (
                 <div className="flex gap-3 text-[10px] font-mono text-slate-500">
-                  <span>_entityId: <span className="text-slate-300">{listRelateState.row?._id ?? listRelateState.row?.id ?? '—'}</span></span>
-                  <span>_listId: <span className={listRelateSelectedList ? 'text-emerald-400' : 'text-slate-600'}>{listRelateSelectedList?._id ?? listRelateSelectedList?.id ?? '—'}</span></span>
+                  {listRelateState.mode === 'entity-pick' ? (
+                    <>
+                      <span>_listId: <span className="text-slate-300">{listRelateState.row?._id ?? listRelateState.row?.id ?? '—'}</span></span>
+                      <span>_entityId: <span className={listRelateSelectedList ? 'text-emerald-400' : 'text-slate-600'}>{listRelateSelectedList?._id ?? listRelateSelectedList?.id ?? '—'}</span></span>
+                    </>
+                  ) : (
+                    <>
+                      <span>_entityId: <span className="text-slate-300">{listRelateState.row?._id ?? listRelateState.row?.id ?? '—'}</span></span>
+                      <span>_listId: <span className={listRelateSelectedList ? 'text-emerald-400' : 'text-slate-600'}>{listRelateSelectedList?._id ?? listRelateSelectedList?.id ?? '—'}</span></span>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -1882,9 +1980,25 @@ export default function ResourcePage() {
                   </div>
                 </>
               )}
+            </div>
 
+            {/* Sticky footer: error + actions */}
+            <div className="px-4 pb-4 pt-3 space-y-3 shrink-0 border-t border-slate-700/50">
+              {/* Error */}
+              {listRelateError && (
+                <div className="text-red-400 text-sm space-y-1">
+                  <p>{listRelateError.message}</p>
+                  {listRelateError.details?.length > 0 && (
+                    <ul className="list-disc list-inside space-y-0.5 text-red-300">
+                      {listRelateError.details.map((d, i) => (
+                        <li key={i}>{d.path ? `${d.path}: ${d.message}` : d.field ? `${d.field}: ${d.message}` : d.message}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {/* Actions */}
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={handleListRelateSubmit}
                   disabled={listRelating || !listRelateRelation || !listRelateSelectedList}
@@ -1899,20 +2013,6 @@ export default function ResourcePage() {
                   Cancel
                 </button>
               </div>
-
-              {/* Error */}
-              {listRelateError && (
-                <div className="text-red-400 text-sm space-y-1">
-                  <p>{listRelateError.message}</p>
-                  {listRelateError.details?.length > 0 && (
-                    <ul className="list-disc list-inside space-y-0.5 text-red-300">
-                      {listRelateError.details.map((d, i) => (
-                        <li key={i}>{d.field ? `${d.field}: ${d.message}` : d.message}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -1940,7 +2040,9 @@ export default function ResourcePage() {
           onTraversalDeleteAll={handleTraversalDeleteAll}
           onTraversalPatchAll={handleTraversalPatchAll}
           onFetchRelatedRecord={handleFetchRelatedRecord}
-          onTraversalRelateToList={listRelationNavItems.length > 0 ? handleTraversalRelateToList : undefined}
+          onTraversalRelateToList={handleTraversalRelateToList}
+          relateTraversalIds={relateTraversalIds}
+          externalRefreshKey={traversalRefreshSignal}
         />
       </div>
 
@@ -1955,6 +2057,7 @@ export default function ResourcePage() {
           )}
         </div>
 
+        {navItem?.hasPagination && (
         <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
           <button
             onClick={() => setPage((p) => Math.max(0, p - 1))}
@@ -1991,6 +2094,7 @@ export default function ResourcePage() {
             page={page + 1} offset={page * pageSize}
           </span>
         </div>
+        )}
       </div>
 
       <Toast message={toastError} onClose={() => setToastError(null)} type="error" />
