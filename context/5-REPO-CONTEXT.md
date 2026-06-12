@@ -4,9 +4,9 @@
 
 `tarcinapp-base-gui` is a **domain-agnostic base UI** for the Tarcinapp entity persistence platform. Its role is to provide a ready-to-use browser interface for browsing and managing any data stored in a Tarcinapp deployment, regardless of what business domain that deployment is configured for.
 
-The UI is not built for books, e-commerce, or any other specific domain. It has no knowledge of domain concepts. Instead, it connects to an `entity-persistence-gateway` instance, fetches the OpenAPI spec that gateway generates for the current user, and builds the entire interface from that spec at runtime: navigation structure, page routes, data grid columns, form fields, and available actions are all derived from the spec, never hardcoded.
+The UI is not built for a specific domain. It has no knowledge of domain concepts. Instead, it connects to an `entity-persistence-gateway` instance, fetches the OpenAPI spec that gateway generates for the current user, and builds the entire interface from that spec at runtime: navigation structure, page routes, data grid columns, form fields, and available actions are all derived from the spec, never hardcoded.
 
-This means the same codebase, without modification, can serve as the admin and explorer UI for a books application, a product catalog, a CRM, a content platform, or any other domain that has been projected through a gateway. Swapping the connected gateway changes what the UI renders. The UI code stays the same.
+This means the same codebase, without modification, can serve as the admin and explorer UI for a books application, a product catalog, a CRM, a content platform, or any other domain that the Tarcinapp been projected through the gateway we are connecting to. Swapping the connected gateway changes what the UI renders. The UI code stays the same.
 
 ---
 
@@ -63,7 +63,7 @@ The Tarcinapp platform stores all data as records in five structural types. Ever
 | **Entity Reaction** | `entity-reactions` | Interactions on entities (ratings, comments, etc.). Supports hierarchy (threaded). |
 | **List Reaction** | `list-reactions` | Interactions on lists. Supports hierarchy. |
 
-The "Resource Segment" is the path segment the gateway uses for each structural type. The actual full path depends on gateway configuration: a base prefix may or may not precede these segments (e.g., the gateway may be configured to expose `/entities` directly, or with a prefix like `/api/v1/entities`).
+The "Resource Segment" is the path segment the gateway uses for each structural type. The actual full path depends on gateway configuration: a base prefix may or may not precede these segments (e.g., the gateway may be configured to expose `/entities` directly, or with a prefix like `/api/v1/entities`, or completely unprefixed like `/items`).
 
 The GUI supports two deployment modes, both fully functional:
 

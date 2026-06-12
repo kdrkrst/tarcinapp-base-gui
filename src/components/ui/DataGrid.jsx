@@ -100,7 +100,7 @@ function ManagedFieldValue({ fieldKey, value, type }) {
   }
   if (type === 'object' && typeof value === 'object') {
     return (
-      <pre className="mt-0.5 text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-2.5 overflow-x-auto max-h-40 whitespace-pre-wrap break-all leading-relaxed">
+      <pre className="mt-0.5 text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
         {JSON.stringify(value, null, 2)}
       </pre>
     )
@@ -218,7 +218,7 @@ function FieldRow({ fieldKey, meta, value }) {
         </span>
       </div>
       {isExpandableObj && objectExpanded && (
-        <pre className="ml-6 mt-1 text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto max-h-40 whitespace-pre-wrap break-all leading-relaxed">
+        <pre className="ml-6 mt-1 text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
           {JSON.stringify(value, null, 2)}
         </pre>
       )}
@@ -341,6 +341,7 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete })
 const TRAVERSAL_PAGE_SIZE = 10
 
 function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
+  const [isExpanded, setIsExpanded] = useState(false)
   const id = item._id
   const shortId = id ? (id.length > 14 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id) : null
   const unmanagedFields = Object.entries(item).filter(([k]) => {
@@ -363,61 +364,136 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
         ? 'text-rose-400'
         : 'text-slate-500'
 
+  // Organize fields like ManagedFieldsPanel does
+  const accessFields = []
+  const otherFields = []
+  const nonManagedFields = []
+
+  if (isExpanded) {
+    // Collect non-managed fields (not starting with _)
+    for (const key of Object.keys(item)) {
+      if (!key.startsWith('_')) {
+        nonManagedFields.push({ key, meta: null, value: item[key] })
+      }
+    }
+
+    // Collect managed fields in order
+    for (const key of MANAGED_FIELD_ORDER) {
+      if (EXCLUDE_FROM_PANEL.has(key)) continue
+      if (!Object.prototype.hasOwnProperty.call(item, key)) continue
+      const entry = { key, meta: MANAGED_FIELDS_META[key] ?? null, value: item[key] }
+      if (ACCESS_FIELDS.has(key)) accessFields.push(entry)
+      else otherFields.push(entry)
+    }
+    // Collect any remaining managed fields not in the order list
+    for (const key of Object.keys(item)) {
+      if (key.startsWith('_') && !MANAGED_FIELD_ORDER.includes(key) && !EXCLUDE_FROM_PANEL.has(key)) {
+        const entry = { key, meta: null, value: item[key] }
+        if (ACCESS_FIELDS.has(key)) accessFields.push(entry)
+        else otherFields.push(entry)
+      }
+    }
+  }
+
   return (
-    <div
-      className="group flex items-center gap-2 pl-3 pr-2 py-1.5 rounded border border-slate-800 hover:border-slate-600 hover:bg-slate-800/50 transition-colors min-w-0"
-      style={{ boxShadow: `inset 3px 0 0 ${borderColor}` }}
-    >
-      {/* short ID + copy */}
-      {id && (
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <span className="font-mono text-[10px] text-slate-500" title={id}>{shortId}</span>
-          <button
-            onClick={(e) => { e.stopPropagation(); onCopyId(id) }}
-            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-500 hover:text-slate-300"
-            title="Copy ID"
-            aria-label="Copy ID"
-          >
-            {copiedId === id ? (
-              <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-            ) : (
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-            )}
-          </button>
+    <div className="rounded border border-slate-800 hover:border-slate-600 transition-colors">
+      <div
+        className="group flex items-center gap-2 pl-3 pr-2 py-1.5 hover:bg-slate-800/50 transition-colors min-w-0"
+        style={{ boxShadow: `inset 3px 0 0 ${borderColor}` }}
+      >
+        {/* short ID + copy */}
+        {id && (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <span className="font-mono text-[10px] text-slate-500" title={id}>{shortId}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onCopyId(id) }}
+              className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-slate-500 hover:text-slate-300"
+              title="Copy ID"
+              aria-label="Copy ID"
+            >
+              {copiedId === id ? (
+                <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+              ) : (
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+              )}
+            </button>
+          </div>
+        )}
+        {/* kind badge */}
+        {item._kind && (
+          <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-violet-900/40 border border-violet-700/50 text-violet-300 text-[10px]">{item._kind}</span>
+        )}
+        {/* name + visibility grouped, left-aligned */}
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          {item._name && (
+            <span className="text-slate-200 text-xs font-medium truncate min-w-0" title={item._name}>{item._name}</span>
+          )}
+          {visibilityLabel && (
+            <span className={`flex-shrink-0 text-[10px] font-medium ${visibilityColor}`}>{visibilityLabel}</span>
+          )}
         </div>
-      )}
-      {/* kind badge */}
-      {item._kind && (
-        <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-violet-900/40 border border-violet-700/50 text-violet-300 text-[10px]">{item._kind}</span>
-      )}
-      {/* name + visibility grouped, left-aligned */}
-      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-        {item._name && (
-          <span className="text-slate-200 text-xs font-medium truncate min-w-0" title={item._name}>{item._name}</span>
-        )}
-        {visibilityLabel && (
-          <span className={`flex-shrink-0 text-[10px] font-medium ${visibilityColor}`}>{visibilityLabel}</span>
-        )}
-      </div>
-      {/* unmanaged fields inline as key: value pairs */}
-      {unmanagedFields.map(([k, v]) => (
-        <span key={k} className="flex-shrink-0 text-[10px] text-slate-500 hidden sm:inline">
-          <span className="text-slate-600">{k}:</span>{' '}
-          <span className="text-slate-300 font-mono">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
-        </span>
-      ))}
-      {/* edit button */}
-      {onEdit && (
+        {/* unmanaged fields inline as key: value pairs */}
+        {unmanagedFields.map(([k, v]) => (
+          <span key={k} className="flex-shrink-0 text-[10px] text-slate-500 hidden sm:inline">
+            <span className="text-slate-600">{k}:</span>{' '}
+            <span className="text-slate-300 font-mono">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+          </span>
+        ))}
+        {/* expand button */}
         <button
-          onClick={(e) => { e.stopPropagation(); onEdit(item) }}
-          className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-slate-700"
-          title="View / Edit record"
-          aria-label="View / Edit record"
+          onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded) }}
+          className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-slate-500 hover:text-blue-300 hover:bg-slate-700"
+          title={isExpanded ? "Collapse fields" : "Expand all fields"}
+          aria-label={isExpanded ? "Collapse fields" : "Expand all fields"}
         >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+          <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </button>
+        {/* edit button */}
+        {onEdit && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit(item) }}
+            className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-slate-700"
+            title="View / Edit record"
+            aria-label="View / Edit record"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+            </svg>
+          </button>
+        )}
+      </div>
+      {/* Expanded fields view - matching ManagedFieldsPanel layout */}
+      {isExpanded && (
+        <div className="border-t border-slate-800 bg-slate-950/40 px-3 py-2">
+          <div className="flex gap-6 flex-wrap">
+            {nonManagedFields.length > 0 && (
+              <div className="min-w-0" style={{ width: 280 }}>
+                <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Fields</p>
+                {nonManagedFields.map(({ key, meta, value }) => (
+                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                ))}
+              </div>
+            )}
+            {otherFields.length > 0 && (
+              <div className="min-w-0" style={{ width: 440 }}>
+                <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Record</p>
+                {otherFields.map(({ key, meta, value }) => (
+                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                ))}
+              </div>
+            )}
+            {accessFields.length > 0 && (
+              <div className="w-72 flex-shrink-0">
+                <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Access & Visibility</p>
+                {accessFields.map(({ key, meta, value }) => (
+                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -651,7 +727,7 @@ function ExpandedRowPanel({
               No {selectedTraversal.label} found.
             </div>
           ) : (
-            <div className="overflow-y-auto max-h-56">
+            <div>
               <div className="px-3 py-1.5 flex flex-col gap-1">
                 {traversalData.map((item, idx) => (
                   <RelatedItemCard

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useApp } from '../../context/AppContext'
 import { parseOasSpec } from '../../utils/oasParser'
@@ -56,12 +55,7 @@ function NavIcon({ d, size = 'w-3.5 h-3.5' }) {
 export default function Sidebar({ collapsed = false, onToggle }) {
   const { oasSpec, disconnect, retry, bypassCache, setBypassCache } = useApp()
   const { navItems } = oasSpec ? parseOasSpec(oasSpec) : { navItems: [] }
-  const [expanded, setExpanded] = useState({})
   const navGroups = groupByBaseType(navItems)
-
-  function toggle(id) {
-    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }))
-  }
 
   return (
     <aside
@@ -136,45 +130,7 @@ export default function Sidebar({ collapsed = false, onToggle }) {
                       {!collapsed && item.label}
                     </NavLink>
 
-                    {!collapsed && item.children.length > 0 && (
-                      <button
-                        onClick={() => toggle(item.id)}
-                        className="p-1 mr-0.5 rounded text-slate-500 hover:text-slate-300 transition-colors"
-                        aria-label={expanded[item.id] ? 'Collapse' : 'Expand'}
-                      >
-                        <svg
-                          className={`w-3.5 h-3.5 transition-transform duration-150 ${expanded[item.id] ? 'rotate-90' : ''}`}
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                          viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
-                    )}
                   </div>
-
-                  {!collapsed && expanded[item.id] && item.children.length > 0 && (
-                    <div className="ml-3 mt-0 pl-2 border-l border-slate-800 space-y-0">
-                      {item.children.map((child) => (
-                        <NavLink
-                          key={child.id}
-                          to={child.routePath}
-                          className={({ isActive }) =>
-                            `flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all duration-150 ${
-                              isActive
-                                ? 'bg-blue-600/80 text-white font-medium'
-                                : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'
-                            }`
-                          }
-                        >
-                          <NavIcon d="M7 16l-4-4m0 0l4-4m-4 4h18" />
-                          {child.label}
-                        </NavLink>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )
             })}
