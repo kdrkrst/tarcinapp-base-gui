@@ -83,6 +83,7 @@ Every record is automatically decorated with managed fields. These are governed 
 | `_version` | `number` | Optimistic locking version. Auto-incremented on updates. |
 | `_idempotencyKey` | `string` | Computed hash for deduplication. Never returned in responses but filterable. |
 | `_parentsCount` | `number` | Cached count of `_parents`. Never returned but filterable (e.g. `filter[where][_parentsCount]=0` finds root records). |
+| `_children` | `string[]` | Array of child record IDs. Populated by the backend by inverting `_parents` references — when a record's `_parents` is set to include a parent ID, that parent's `_children` is updated automatically. Not accepted in POST, PUT, or PATCH requests; modify `_parents` on the child record to influence this field indirectly. |
 | `_ownerUsersCount` | `number` | Cached count of owner users. Never returned but filterable. |
 | `_ownerGroupsCount` | `number` | Same for owner groups. |
 | `_viewerUsersCount` | `number` | Same for viewer users. |
