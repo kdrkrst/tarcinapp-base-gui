@@ -226,6 +226,63 @@ function FieldRow({ fieldKey, meta, value }) {
   )
 }
 
+function ResizableColumns({ columns }) {
+  const [widths, setWidths] = useState(() => columns.map((c) => c.defaultWidth ?? 280))
+  const widthsRef = useRef(null)
+  widthsRef.current = widths
+
+  function handleDragStart(e, colIdx) {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = widthsRef.current[colIdx]
+    const minW = columns[colIdx]?.minWidth ?? 120
+
+    function onMove(ev) {
+      const newW = Math.max(minW, startW + ev.clientX - startX)
+      setWidths((prev) => {
+        const next = [...prev]
+        next[colIdx] = newW
+        return next
+      })
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  return (
+    <div className="flex items-start overflow-x-auto">
+      {columns.map((col, i) => (
+        <Fragment key={col.id ?? i}>
+          <div style={{ width: widths[i], minWidth: col.minWidth ?? 120, flexShrink: 0, overflow: 'hidden' }}>
+            {col.header && (
+              <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">{col.header}</p>
+            )}
+            {col.content}
+          </div>
+          {i < columns.length - 1 && (
+            <div
+              className="w-5 flex-shrink-0 flex justify-center self-stretch cursor-col-resize group mx-3"
+              onMouseDown={(e) => handleDragStart(e, i)}
+              role="separator"
+              aria-orientation="vertical"
+            >
+              <div className="w-0.5 bg-transparent group-hover:bg-blue-600 transition-colors" />
+            </div>
+          )}
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
 function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete }) {
   const accessFields = []
   const otherFields = []
@@ -257,32 +314,26 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete })
 
   return (
     <div className="bg-slate-950/60 border-t border-slate-700/40 px-4 py-2.5">
-      <div className="flex gap-6 flex-wrap">
-        {nonManagedFields.length > 0 && (
-          <div className="min-w-0" style={{ width: 280 }}>
-            <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Fields</p>
-            {nonManagedFields.map(({ key, meta, value }) => (
-              <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-            ))}
-          </div>
-        )}
-        {otherFields.length > 0 && (
-          <div className="min-w-0" style={{ width: 440 }}>
-            <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Record</p>
-            {otherFields.map(({ key, meta, value }) => (
-              <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-            ))}
-          </div>
-        )}
-        {accessFields.length > 0 && (
-          <div className="w-72 flex-shrink-0">
-            <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Access & Visibility</p>
-            {accessFields.map(({ key, meta, value }) => (
-              <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-            ))}
-          </div>
-        )}
-      </div>
+      <ResizableColumns columns={[
+        ...(nonManagedFields.length > 0 ? [{
+          id: 'fields', header: 'Fields', defaultWidth: 280,
+          content: nonManagedFields.map(({ key, meta, value }) => (
+            <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+          )),
+        }] : []),
+        ...(otherFields.length > 0 ? [{
+          id: 'record', header: 'Record', defaultWidth: 440,
+          content: otherFields.map(({ key, meta, value }) => (
+            <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+          )),
+        }] : []),
+        ...(accessFields.length > 0 ? [{
+          id: 'access', header: 'Access & Visibility', defaultWidth: 288,
+          content: accessFields.map(({ key, meta, value }) => (
+            <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+          )),
+        }] : []),
+      ]} />
       <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-800/70 -mx-4 px-4">
         {(onActivate || onDeactivate) && (
           <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
@@ -534,32 +585,26 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
           {relationMeta && (
             <div className="px-3 pt-2.5 pb-1.5">
               <p className="text-[10px] uppercase tracking-widest text-teal-600 font-semibold mb-1.5">Relation</p>
-              <div className="flex gap-6 flex-wrap">
-                {relNonManagedFields.length > 0 && (
-                  <div className="min-w-0" style={{ width: 280 }}>
-                    <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Fields</p>
-                    {relNonManagedFields.map(({ key, meta, value }) => (
-                      <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                    ))}
-                  </div>
-                )}
-                {relOtherFields.length > 0 && (
-                  <div className="min-w-0" style={{ width: 440 }}>
-                    <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Details</p>
-                    {relOtherFields.map(({ key, meta, value }) => (
-                      <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                    ))}
-                  </div>
-                )}
-                {relAccessFields.length > 0 && (
-                  <div className="w-72 flex-shrink-0">
-                    <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Access & Visibility</p>
-                    {relAccessFields.map(({ key, meta, value }) => (
-                      <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                    ))}
-                  </div>
-                )}
-              </div>
+              <ResizableColumns columns={[
+                ...(relNonManagedFields.length > 0 ? [{
+                  id: 'fields', header: 'Fields', defaultWidth: 280,
+                  content: relNonManagedFields.map(({ key, meta, value }) => (
+                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                  )),
+                }] : []),
+                ...(relOtherFields.length > 0 ? [{
+                  id: 'details', header: 'Details', defaultWidth: 440,
+                  content: relOtherFields.map(({ key, meta, value }) => (
+                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                  )),
+                }] : []),
+                ...(relAccessFields.length > 0 ? [{
+                  id: 'access', header: 'Access & Visibility', defaultWidth: 288,
+                  content: relAccessFields.map(({ key, meta, value }) => (
+                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                  )),
+                }] : []),
+              ]} />
               {onFetchRelation && relationMeta._id && (
                 <button
                   onClick={handleToggleFullRelation}
@@ -588,32 +633,26 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
           {/* Record fields */}
           <div className="px-3 py-2">
             {recordTypeLabel && <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">{recordTypeLabel}</p>}
-            <div className="flex gap-6 flex-wrap">
-              {nonManagedFields.length > 0 && (
-                <div className="min-w-0" style={{ width: 280 }}>
-                  <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Fields</p>
-                  {nonManagedFields.map(({ key, meta, value }) => (
-                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                  ))}
-                </div>
-              )}
-              {otherFields.length > 0 && (
-                <div className="min-w-0" style={{ width: 440 }}>
-                  <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Record</p>
-                  {otherFields.map(({ key, meta, value }) => (
-                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                  ))}
-                </div>
-              )}
-              {accessFields.length > 0 && (
-                <div className="w-72 flex-shrink-0">
-                  <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Access & Visibility</p>
-                  {accessFields.map(({ key, meta, value }) => (
-                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                  ))}
-                </div>
-              )}
-            </div>
+            <ResizableColumns columns={[
+              ...(nonManagedFields.length > 0 ? [{
+                id: 'fields', header: 'Fields', defaultWidth: 280,
+                content: nonManagedFields.map(({ key, meta, value }) => (
+                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                )),
+              }] : []),
+              ...(otherFields.length > 0 ? [{
+                id: 'record', header: 'Record', defaultWidth: 440,
+                content: otherFields.map(({ key, meta, value }) => (
+                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                )),
+              }] : []),
+              ...(accessFields.length > 0 ? [{
+                id: 'access', header: 'Access & Visibility', defaultWidth: 288,
+                content: accessFields.map(({ key, meta, value }) => (
+                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                )),
+              }] : []),
+            ]} />
           </div>
         </div>
       )}
