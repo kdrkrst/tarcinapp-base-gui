@@ -108,6 +108,19 @@ function deriveBaseTypeFromPath(collectionPath) {
  *   children: [{ id, label, routePath, pathTemplate, parentTag, subResource }]
  * }
  */
+const FALLBACK_SET_PROPS = {
+  publics:    { isObject: false },
+  privates:   { isObject: false },
+  protecteds: { isObject: false },
+  actives:    { isObject: false },
+  expireds:   { isObject: false },
+  pendings:   { isObject: false },
+  roots:      { isObject: false },
+  owners:     { isObject: true },
+  viewers:    { isObject: true },
+  audience:   { isObject: true },
+}
+
 export function parseOasSpec(spec) {
   if (!spec?.paths) return { navItems: [], tagMap: {} }
 
@@ -225,6 +238,17 @@ export function parseOasSpec(spec) {
       )
       const hasSet = !!setParam
 
+      // Derive set schema props for Sets dropdown (key → { isObject })
+      const setSchemaProps = setParam
+        ? (setParam.schema?.properties
+            ? Object.fromEntries(
+                Object.entries(setParam.schema.properties).map(([k, v]) => [
+                  k, { isObject: v?.type === 'object' || v?.properties != null },
+                ])
+              )
+            : FALLBACK_SET_PROPS)
+        : null
+
       // Detect q parameter and its enum values
       const qParam = collectionGetParams.find((p) => p?.name === 'q' && p?.in === 'query')
       const qEnumValues = Array.isArray(qParam?.schema?.enum) ? qParam.schema.enum : null
@@ -252,6 +276,7 @@ export function parseOasSpec(spec) {
         hasPagination,
         hasValidityDates,
         hasSet,
+        setSchemaProps,
         hasFilterFields,
         hasFilterOrder,
         hasFieldset,

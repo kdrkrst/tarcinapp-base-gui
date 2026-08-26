@@ -7,26 +7,8 @@ import { useResourceList } from '../../hooks/useResourceList'
 import DataGrid from '../ui/DataGrid'
 import Toast from '../ui/Toast'
 
-const STATUS_OPTIONS = [
-  { key: 'actives', label: 'Actives' },
-  { key: 'pendings', label: 'Pendings' },
-  { key: 'expireds', label: 'Expireds' },
-]
-
-const VISIBILITY_OPTIONS = [
-  { key: 'publics', label: 'Public' },
-  { key: 'protecteds', label: 'Protected' },
-  { key: 'privates', label: 'Private' },
-]
-
 function buildItemPath(template, id) {
   return template.replace(/\{[^}]+\}/, encodeURIComponent(id))
-}
-
-function toggleSelection(selectedValues, value) {
-  return selectedValues.includes(value)
-    ? selectedValues.filter((entry) => entry !== value)
-    : [...selectedValues, value]
 }
 
 function buildSetQuery(queryString, statusSelections, visibilitySelections) {
@@ -55,6 +37,18 @@ function buildSetQuery(queryString, statusSelections, visibilitySelections) {
     })
   })
 
+  return queryString
+}
+
+function buildSetsQuery(queryString, setSelections) {
+  for (const [key, val] of Object.entries(setSelections)) {
+    if (val === true) {
+      queryString.set(`set[${key}]`, 'true')
+    } else if (val && typeof val === 'object') {
+      if (val.userIds?.trim()) queryString.set(`set[${key}][userIds]`, val.userIds.trim())
+      if (val.groupIds?.trim()) queryString.set(`set[${key}][groupIds]`, val.groupIds.trim())
+    }
+  }
   return queryString
 }
 
@@ -447,8 +441,7 @@ export default function ResourcePage() {
   const navigate = useNavigate()
   const { oasSpec, endpoint, token } = useApp()
   const { get, getWithMeta, post, patch, del } = useApiClient()
-  const [statusSelections, setStatusSelections] = useState([])
-  const [visibilitySelections, setVisibilitySelections] = useState([])
+  const [setSelections, setSetSelections] = useState({})
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(25)
   const [queryInfoOpen, setQueryInfoOpen] = useState(false)
@@ -479,8 +472,10 @@ export default function ResourcePage() {
   const [requestHeaders, setRequestHeaders] = useState(null)
   const [qDropdownOpen, setQDropdownOpen] = useState(false)
   const [fieldsetDropdownOpen, setFieldsetDropdownOpen] = useState(false)
+  const [setsDropdownOpen, setSetsDropdownOpen] = useState(false)
   const qDropdownRef = useRef(null)
   const fieldsetDropdownRef = useRef(null)
+  const setsDropdownRef = useRef(null)
   const isResizing = useRef(false)
   const resizeStartX = useRef(0)
   const resizeStartWidth = useRef(0)
@@ -631,13 +626,13 @@ export default function ResourcePage() {
     [oasSpec, navItem?.collectionPath]
   )
 
-  const hasAnySetSelection = statusSelections.length > 0 || visibilitySelections.length > 0
+  const hasAnySetSelection = Object.keys(setSelections).length > 0
 
   const querySummary = useMemo(() => {
     const qs = new URLSearchParams()
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
-    buildSetQuery(qs, statusSelections, visibilitySelections)
+    buildSetsQuery(qs, setSelections)
     if (debouncedSearch) {
       if (navItem?.hasSimplifiedSearch) qs.set('s', debouncedSearch)
       else qs.set('filter[where][_name][regexp]', `.*${debouncedSearch}.*`)
@@ -647,7 +642,7 @@ export default function ResourcePage() {
     buildFilterFieldsParams(qs, fieldSelectorState)
     buildFilterOrderParams(qs, sortOrder)
     return formatQueryPreview(qs)
-  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
+  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, setSelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
 
   useEffect(() => {
     setPage(0)
@@ -657,7 +652,8 @@ export default function ResourcePage() {
     setSelectedQ(null)
     setSelectedFieldset(null)
     setSortOrder([])
-  }, [navItem?.collectionPath, statusSelections, visibilitySelections])
+    setSetSelections({})
+  }, [navItem?.collectionPath])
 
   useEffect(() => {
     if (!qDropdownOpen) return undefined
@@ -672,6 +668,13 @@ export default function ResourcePage() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [fieldsetDropdownOpen])
+
+  useEffect(() => {
+    if (!setsDropdownOpen) return undefined
+    const handler = (e) => { if (setsDropdownRef.current && !setsDropdownRef.current.contains(e.target)) setSetsDropdownOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [setsDropdownOpen])
 
   useEffect(() => {
     if (!toastError) return undefined
@@ -750,7 +753,7 @@ export default function ResourcePage() {
     const qs = new URLSearchParams()
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
-    buildSetQuery(qs, statusSelections, visibilitySelections)
+    buildSetsQuery(qs, setSelections)
     if (debouncedSearch) {
       if (navItem?.hasSimplifiedSearch) qs.set('s', debouncedSearch)
       else qs.set('filter[where][_name][regexp]', `.*${debouncedSearch}.*`)
@@ -767,7 +770,7 @@ export default function ResourcePage() {
     setResponseStatus(status)
     setRequestHeaders(reqHeaders ?? null)
     return data ?? []
-  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, statusSelections, visibilitySelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
+  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, setSelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
 
   const { data, loading, error, refresh } = useResourceList(fetcher)
 
@@ -1149,8 +1152,7 @@ export default function ResourcePage() {
             const activeFilterCount = [
               selectedQ !== null,
               selectedFieldset !== null,
-              statusSelections.length > 0,
-              visibilitySelections.length > 0,
+              Object.keys(setSelections).length > 0,
               fieldSelectorState.mode !== 'all',
               sortOrder.length > 0,
             ].filter(Boolean).length
@@ -1225,9 +1227,9 @@ export default function ResourcePage() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-200">Filters</p>
             <div className="flex items-center gap-3">
-              {[selectedQ !== null, selectedFieldset !== null, statusSelections.length > 0, visibilitySelections.length > 0, fieldSelectorState.mode !== 'all', sortOrder.length > 0].some(Boolean) && (
+              {[selectedQ !== null, selectedFieldset !== null, Object.keys(setSelections).length > 0, fieldSelectorState.mode !== 'all', sortOrder.length > 0].some(Boolean) && (
                 <button
-                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setStatusSelections([]); setVisibilitySelections([]); setFieldSelectorState({ mode: 'all', selected: new Set() }); setSortOrder([]); setPage(0) }}
+                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setSetSelections({}); setFieldSelectorState({ mode: 'all', selected: new Set() }); setSortOrder([]); setPage(0) }}
                   className="text-xs text-slate-400 hover:text-blue-400 transition-colors"
                 >
                   Clear all
@@ -1247,6 +1249,89 @@ export default function ResourcePage() {
 
           {/* Quick-filter row */}
           <div className="flex flex-wrap gap-6">
+            {navItem.hasSet && navItem.setSchemaProps && (
+              <div className="space-y-1.5" ref={setsDropdownRef}>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Sets</p>
+                <div className="relative">
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setSetsDropdownOpen((v) => !v)}
+                      className={`flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border ${setsDropdownOpen || Object.keys(setSelections).length > 0 ? 'border-blue-600' : 'border-slate-700'} text-slate-300 hover:bg-slate-700 hover:text-white transition-colors min-w-[140px]`}
+                    >
+                      <span className="truncate mr-1.5">
+                        {Object.keys(setSelections).length > 0
+                          ? <span className="text-blue-300">{Object.keys(setSelections).join(', ')}</span>
+                          : <span className="text-slate-500">— none —</span>}
+                      </span>
+                      <svg className="w-3 h-3 flex-shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    </button>
+                    {Object.keys(setSelections).length > 0 && (
+                      <button
+                        onClick={() => { setSetSelections({}); setPage(0) }}
+                        className="flex items-center justify-center w-5 h-5 rounded text-slate-500 hover:text-white hover:bg-slate-700 transition-colors"
+                        title="Clear set filters"
+                        aria-label="Clear set filters"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    )}
+                  </div>
+                  {setsDropdownOpen && (
+                    <div className="absolute left-0 top-full mt-1 z-20 min-w-[260px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-3 space-y-2">
+                      {Object.entries(navItem.setSchemaProps).map(([key, meta]) => {
+                        const isChecked = key in setSelections
+                        return (
+                          <div key={key}>
+                            <label className="flex items-center gap-2 cursor-pointer group/setopt">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setPage(0)
+                                  if (isChecked) {
+                                    const next = { ...setSelections }
+                                    delete next[key]
+                                    setSetSelections(next)
+                                  } else {
+                                    setSetSelections({ ...setSelections, [key]: meta.isObject ? { userIds: '', groupIds: '' } : true })
+                                  }
+                                }}
+                                className="w-3.5 h-3.5 accent-blue-500 cursor-pointer flex-shrink-0"
+                              />
+                              <span className={`text-xs font-mono ${isChecked ? 'text-blue-300' : 'text-slate-300 group-hover/setopt:text-white'}`}>{key}</span>
+                            </label>
+                            {isChecked && meta.isObject && (
+                              <div className="ml-5 mt-2 space-y-2">
+                                <div>
+                                  <p className="text-[10px] text-slate-500 mb-0.5">userIds</p>
+                                  <input
+                                    type="text"
+                                    value={setSelections[key]?.userIds ?? ''}
+                                    onChange={(e) => setSetSelections((prev) => ({ ...prev, [key]: { ...prev[key], userIds: e.target.value } }))}
+                                    placeholder="user-id-1"
+                                    className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                </div>
+                                <div>
+                                  <p className="text-[10px] text-slate-500 mb-0.5">groupIds</p>
+                                  <input
+                                    type="text"
+                                    value={setSelections[key]?.groupIds ?? ''}
+                                    onChange={(e) => setSetSelections((prev) => ({ ...prev, [key]: { ...prev[key], groupIds: e.target.value } }))}
+                                    placeholder="group-id-1"
+                                    className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {qEnumValues && (
               <div className="space-y-1.5" ref={qDropdownRef}>
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Query</p>
@@ -1333,21 +1418,30 @@ export default function ResourcePage() {
               </div>
             )}
 
-            {navItem.hasSet && navItem.hasValidityDates && (
+            {navItem.hasSet && navItem.hasValidityDates && navItem.setSchemaProps && ['actives', 'pendings', 'expireds'].some((k) => k in navItem.setSchemaProps) && (
               <div className="space-y-1.5">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Status</p>
                 <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
-                  {STATUS_OPTIONS.map((option) => {
-                    const selected = statusSelections.includes(option.key)
+                  {['actives', 'pendings', 'expireds'].filter((k) => k in navItem.setSchemaProps).map((key) => {
+                    const selected = setSelections[key] === true
+                    const label = key.charAt(0).toUpperCase() + key.slice(1)
                     return (
                       <button
-                        key={option.key}
-                        onClick={() => setStatusSelections((cur) => toggleSelection(cur, option.key))}
+                        key={key}
+                        onClick={() => {
+                          setPage(0)
+                          setSetSelections((prev) => {
+                            const next = { ...prev }
+                            if (next[key]) delete next[key]
+                            else next[key] = true
+                            return next
+                          })
+                        }}
                         className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
                           selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
                         }`}
                       >
-                        {option.label}
+                        {label}
                       </button>
                     )
                   })}
@@ -1355,27 +1449,36 @@ export default function ResourcePage() {
               </div>
             )}
 
-            {navItem.hasSet && (
-            <div className="space-y-1.5">
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Visibility</p>
-              <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
-                {VISIBILITY_OPTIONS.map((option) => {
-                  const selected = visibilitySelections.includes(option.key)
-                  return (
-                    <button
-                      key={option.key}
-                      onClick={() => setVisibilitySelections((cur) => toggleSelection(cur, option.key))}
-                      className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
-                        selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  )
-                })}
+            {navItem.hasSet && navItem.setSchemaProps && ['publics', 'protecteds', 'privates'].some((k) => k in navItem.setSchemaProps) && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Visibility</p>
+                <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+                  {[{ key: 'publics', label: 'Public' }, { key: 'protecteds', label: 'Protected' }, { key: 'privates', label: 'Private' }].filter(({ key }) => key in navItem.setSchemaProps).map(({ key, label }) => {
+                    const selected = setSelections[key] === true
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => {
+                          setPage(0)
+                          setSetSelections((prev) => {
+                            const next = { ...prev }
+                            if (next[key]) delete next[key]
+                            else next[key] = true
+                            return next
+                          })
+                        }}
+                        className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
+                          selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
             )}
+
           </div>
 
           {/* Column selector */}

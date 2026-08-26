@@ -1148,7 +1148,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
             return (
             <Fragment key={rowId}>
             <tr
-              className="group transition-colors hover:bg-slate-800/40 cursor-pointer"
+              className={`group transition-colors hover:bg-slate-800/40 cursor-pointer${status === 'expired' ? ' opacity-60' : ''}`}
               onClick={() => setExpandedRowId(isExpanded ? null : rowId)}
             >
               {columns.map((col, colIdx) => (
