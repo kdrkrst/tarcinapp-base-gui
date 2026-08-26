@@ -2296,23 +2296,23 @@ export default function ResourcePage() {
               </button>
 
               {/* Applied filters */}
-              {statusSelections.length > 0 && (
+              {['actives', 'pendings', 'expireds'].some((k) => setSelections[k]) && (
                 <div className="space-y-1.5">
                   <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Status filter</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {STATUS_OPTIONS.filter((o) => statusSelections.includes(o.key)).map((o) => (
-                      <span key={o.key} className="px-2 py-0.5 text-xs rounded-md bg-blue-600/20 text-blue-300 border border-blue-700">{o.label}</span>
+                    {['actives', 'pendings', 'expireds'].filter((k) => setSelections[k]).map((k) => (
+                      <span key={k} className="px-2 py-0.5 text-xs rounded-md bg-blue-600/20 text-blue-300 border border-blue-700">{k.charAt(0).toUpperCase() + k.slice(1)}</span>
                     ))}
                   </div>
                 </div>
               )}
 
-              {visibilitySelections.length > 0 && (
+              {['publics', 'protecteds', 'privates'].some((k) => setSelections[k]) && (
                 <div className="space-y-1.5">
                   <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Visibility filter</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {VISIBILITY_OPTIONS.filter((o) => visibilitySelections.includes(o.key)).map((o) => (
-                      <span key={o.key} className="px-2 py-0.5 text-xs rounded-md bg-violet-600/20 text-violet-300 border border-violet-700">{o.label}</span>
+                    {[{ key: 'publics', label: 'Public' }, { key: 'protecteds', label: 'Protected' }, { key: 'privates', label: 'Private' }].filter(({ key }) => setSelections[key]).map(({ key, label }) => (
+                      <span key={key} className="px-2 py-0.5 text-xs rounded-md bg-violet-600/20 text-violet-300 border border-violet-700">{label}</span>
                     ))}
                   </div>
                 </div>
