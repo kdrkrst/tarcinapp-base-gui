@@ -340,8 +340,11 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete })
 
 const TRAVERSAL_PAGE_SIZE = 10
 
-function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
+function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFetchRelation, recordTypeLabel }) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const [fullRelation, setFullRelation] = useState(null)
+  const [fullRelationLoading, setFullRelationLoading] = useState(false)
+  const [fullRelationExpanded, setFullRelationExpanded] = useState(false)
   const id = item._id
   const shortId = id ? (id.length > 14 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id) : null
   const unmanagedFields = Object.entries(item).filter(([k]) => {
@@ -352,6 +355,36 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
 
   const status = computeRowStatus(item)
   const borderColor = STATUS_SHADOW_COLOR[status]
+  const relationMeta = item._relationMetadata ?? null
+  const relationStatus = relationMeta ? computeRowStatus(relationMeta) : null
+  const RELATION_CHIP_COLORS = {
+    active:  'bg-emerald-900/40 border-emerald-700/50 text-emerald-300',
+    pending: 'bg-amber-900/40 border-amber-700/50 text-amber-300',
+    expired: 'bg-rose-900/40 border-rose-700/50 text-rose-300',
+  }
+  const relationChipClass = (relationStatus && RELATION_CHIP_COLORS[relationStatus]) ?? 'bg-slate-800 border-slate-700 text-slate-400'
+
+  const handleToggleFullRelation = async () => {
+    if (fullRelationExpanded) {
+      setFullRelationExpanded(false)
+      return
+    }
+    // Already cached — just expand
+    if (fullRelation !== null || !onFetchRelation || !relationMeta?._id) {
+      setFullRelationExpanded(true)
+      return
+    }
+    setFullRelationLoading(true)
+    try {
+      const result = await onFetchRelation(relationMeta._id)
+      setFullRelation(result?.record ?? null)
+    } catch {
+      // silently fall back to metadata only
+    } finally {
+      setFullRelationLoading(false)
+      setFullRelationExpanded(true)
+    }
+  }
 
   const visibilityLabel = item._visibility
     ? item._visibility.charAt(0).toUpperCase() + item._visibility.slice(1)
@@ -368,6 +401,9 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
   const accessFields = []
   const otherFields = []
   const nonManagedFields = []
+  const relNonManagedFields = []
+  const relOtherFields = []
+  const relAccessFields = []
 
   if (isExpanded) {
     // Collect non-managed fields (not starting with _)
@@ -377,9 +413,10 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
       }
     }
 
-    // Collect managed fields in order
+    // Collect managed fields in order (exclude _relationMetadata — shown in its own section)
     for (const key of MANAGED_FIELD_ORDER) {
       if (EXCLUDE_FROM_PANEL.has(key)) continue
+      if (key === '_relationMetadata') continue
       if (!Object.prototype.hasOwnProperty.call(item, key)) continue
       const entry = { key, meta: MANAGED_FIELDS_META[key] ?? null, value: item[key] }
       if (ACCESS_FIELDS.has(key)) accessFields.push(entry)
@@ -391,6 +428,28 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
         const entry = { key, meta: null, value: item[key] }
         if (ACCESS_FIELDS.has(key)) accessFields.push(entry)
         else otherFields.push(entry)
+      }
+    }
+
+    // Collect relation fields for columnized display
+    if (relationMeta) {
+      const relData = fullRelationExpanded && fullRelation ? fullRelation : relationMeta
+      for (const key of Object.keys(relData)) {
+        if (!key.startsWith('_')) relNonManagedFields.push({ key, meta: null, value: relData[key] })
+      }
+      for (const key of MANAGED_FIELD_ORDER) {
+        if (EXCLUDE_FROM_PANEL.has(key)) continue
+        if (!Object.prototype.hasOwnProperty.call(relData, key)) continue
+        const entry = { key, meta: MANAGED_FIELDS_META[key] ?? null, value: relData[key] }
+        if (ACCESS_FIELDS.has(key)) relAccessFields.push(entry)
+        else relOtherFields.push(entry)
+      }
+      for (const key of Object.keys(relData)) {
+        if (key.startsWith('_') && !MANAGED_FIELD_ORDER.includes(key)) {
+          const entry = { key, meta: null, value: relData[key] }
+          if (ACCESS_FIELDS.has(key)) relAccessFields.push(entry)
+          else relOtherFields.push(entry)
+        }
       }
     }
   }
@@ -422,6 +481,10 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
         {/* kind badge */}
         {item._kind && (
           <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-violet-900/40 border border-violet-700/50 text-violet-300 text-[10px]">{item._kind}</span>
+        )}
+        {/* relation kind badge — colored by relation validity */}
+        {relationMeta?._kind && (
+          <span className={`flex-shrink-0 px-1.5 py-0.5 rounded border text-[10px] ${relationChipClass}`} title="Relation kind">via {relationMeta._kind}</span>
         )}
         {/* name + visibility grouped, left-aligned */}
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
@@ -464,34 +527,93 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields }) {
           </button>
         )}
       </div>
-      {/* Expanded fields view - matching ManagedFieldsPanel layout */}
+      {/* Expanded fields view */}
       {isExpanded && (
-        <div className="border-t border-slate-800 bg-slate-950/40 px-3 py-2">
-          <div className="flex gap-6 flex-wrap">
-            {nonManagedFields.length > 0 && (
-              <div className="min-w-0" style={{ width: 280 }}>
-                <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Fields</p>
-                {nonManagedFields.map(({ key, meta, value }) => (
-                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                ))}
+        <div className="border-t border-slate-800 bg-slate-950/40">
+          {/* Relation metadata section */}
+          {relationMeta && (
+            <div className="px-3 pt-2.5 pb-1.5">
+              <p className="text-[10px] uppercase tracking-widest text-teal-600 font-semibold mb-1.5">Relation</p>
+              <div className="flex gap-6 flex-wrap">
+                {relNonManagedFields.length > 0 && (
+                  <div className="min-w-0" style={{ width: 280 }}>
+                    <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Fields</p>
+                    {relNonManagedFields.map(({ key, meta, value }) => (
+                      <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                    ))}
+                  </div>
+                )}
+                {relOtherFields.length > 0 && (
+                  <div className="min-w-0" style={{ width: 440 }}>
+                    <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Details</p>
+                    {relOtherFields.map(({ key, meta, value }) => (
+                      <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                    ))}
+                  </div>
+                )}
+                {relAccessFields.length > 0 && (
+                  <div className="w-72 flex-shrink-0">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Access & Visibility</p>
+                    {relAccessFields.map(({ key, meta, value }) => (
+                      <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            {otherFields.length > 0 && (
-              <div className="min-w-0" style={{ width: 440 }}>
-                <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Record</p>
-                {otherFields.map(({ key, meta, value }) => (
-                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                ))}
-              </div>
-            )}
-            {accessFields.length > 0 && (
-              <div className="w-72 flex-shrink-0">
-                <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Access & Visibility</p>
-                {accessFields.map(({ key, meta, value }) => (
-                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                ))}
-              </div>
-            )}
+              {onFetchRelation && relationMeta._id && (
+                <button
+                  onClick={handleToggleFullRelation}
+                  disabled={fullRelationLoading}
+                  className="mt-1.5 inline-flex items-center gap-1 px-1 py-0.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50"
+                >
+                  {fullRelationLoading ? (
+                    <svg className="animate-spin w-2.5 h-2.5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                  ) : (
+                    <svg className={`w-2.5 h-2.5 transition-transform ${fullRelationExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  )}
+                  {fullRelationLoading ? 'Loading…' : fullRelationExpanded ? 'collapse' : 'more'}
+                </button>
+              )}
+            </div>
+          )}
+          {/* Divider between relation and record fields */}
+          {relationMeta && (
+            <hr className="border-slate-700/60 mx-3" />
+          )}
+          {/* Record fields */}
+          <div className="px-3 py-2">
+            {recordTypeLabel && <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">{recordTypeLabel}</p>}
+            <div className="flex gap-6 flex-wrap">
+              {nonManagedFields.length > 0 && (
+                <div className="min-w-0" style={{ width: 280 }}>
+                  <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Fields</p>
+                  {nonManagedFields.map(({ key, meta, value }) => (
+                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                  ))}
+                </div>
+              )}
+              {otherFields.length > 0 && (
+                <div className="min-w-0" style={{ width: 440 }}>
+                  <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Record</p>
+                  {otherFields.map(({ key, meta, value }) => (
+                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                  ))}
+                </div>
+              )}
+              {accessFields.length > 0 && (
+                <div className="w-72 flex-shrink-0">
+                  <p className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold mb-1.5">Access & Visibility</p>
+                  {accessFields.map(({ key, meta, value }) => (
+                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -513,6 +635,7 @@ function ExpandedRowPanel({
   traversalSortField, onTraversalSortFieldChange,
   traversalSortDir, onTraversalSortDirChange,
   traversalVisibleFields, onTraversalVisibleFieldsChange,
+  onFetchRelation,
 }) {
   const displayRecord = fullRecord ?? row
   const title = displayRecord._name ?? displayRecord._kind ?? null
@@ -533,6 +656,13 @@ function ExpandedRowPanel({
     ? [...new Set(traversalData.flatMap((item) => Object.keys(item)))]
     : []
   const availableSortFields = availableFields.filter((k) => !['_slug', '_fromMetadata', '_toMetadata'].includes(k))
+
+  // Derive item type label from traversal subResource for RelatedItemCard section title
+  const traversalSub = selectedTraversal?.subResource ?? ''
+  const traversalItemTypeLabel =
+    traversalSub === '__entity' || traversalSub.startsWith('entities') ? 'Entity' :
+    traversalSub === '__list' || traversalSub.startsWith('lists') ? 'List' :
+    traversalSub.startsWith('reactions') ? 'Reaction' : null
   const availableVisibleFields = availableFields.filter((k) => !k.startsWith('_'))
 
   const showFilterBar = selectedTraversal && !selectedTraversal.synthetic
@@ -737,6 +867,8 @@ function ExpandedRowPanel({
                     onCopyId={onCopyId}
                     onEdit={onViewTraversalItem}
                     visibleFields={traversalVisibleFields}
+                    onFetchRelation={onFetchRelation}
+                    recordTypeLabel={traversalItemTypeLabel}
                   />
                 ))}
               </div>
@@ -1406,6 +1538,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       onTraversalSortDirChange={setTraversalSortDir}
                       traversalVisibleFields={traversalVisibleFields}
                       onTraversalVisibleFieldsChange={setTraversalVisibleFields}
+                      onFetchRelation={onFetchRelatedRecord}
                     />
                   </div>
                 </td>
