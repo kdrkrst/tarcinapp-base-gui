@@ -978,8 +978,16 @@ export default function ResourcePage() {
     }
   }, [post, listRelateState, listRelateRelation, listRelateSelectedList, listRelateFormValues, listRelateWritableFields])
 
-  const handleFetchRelatedRecord = useCallback(async (id) => {
-    for (const item of navItems) {
+  const handleFetchRelatedRecord = useCallback(async (id, traversalSubResource) => {
+    // Prioritize navItems whose collection path matches the traversal's subResource
+    const preferred = traversalSubResource
+      ? navItems.filter((n) => {
+          const path = n.collectionPath ?? ''
+          return path.endsWith(traversalSubResource) || path.endsWith('/' + traversalSubResource.split('/').pop())
+        })
+      : []
+    const rest = navItems.filter((n) => !preferred.includes(n))
+    for (const item of [...preferred, ...rest]) {
       if (!item.itemPathTemplate) continue
       try {
         const path = item.itemPathTemplate.replace(/\{[^}]+\}/, encodeURIComponent(id))

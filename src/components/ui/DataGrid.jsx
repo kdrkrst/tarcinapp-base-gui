@@ -1560,7 +1560,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                         const id = item._id ?? item.id
                         if (id) {
                           setRelatedRecordModal({ loading: true, record: null, navItem: null, error: null })
-                          onFetchRelatedRecord(id)
+                          onFetchRelatedRecord(id, selectedTraversal?.subResource)
                             .then((result) => setRelatedRecordModal({ loading: false, record: result?.record ?? item, navItem: result?.navItem ?? null, error: null }))
                             .catch(() => setRelatedRecordModal({ loading: false, record: item, navItem: null, error: null }))
                         } else {
