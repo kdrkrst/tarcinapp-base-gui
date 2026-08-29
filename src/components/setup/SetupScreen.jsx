@@ -2,9 +2,9 @@ import { useRef, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 
 export default function SetupScreen() {
-  const { connect, connectWithUploadedSpec, oasStatus, oasError } = useApp()
-  const [endpoint, setEndpoint] = useState('http://localhost:8081')
-  const [token, setToken] = useState('')
+  const { connect, connectWithUploadedSpec, oasStatus, oasError, endpoint: storedEndpoint, token: storedToken } = useApp()
+  const [endpoint, setEndpoint] = useState(storedEndpoint ?? 'http://localhost:8081')
+  const [token, setToken] = useState(storedToken ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef(null)

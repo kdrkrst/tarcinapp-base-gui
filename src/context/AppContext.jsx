@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { createContext, useContext, useState, useCallback } from 'react'
 
 const AppContext = createContext(null)
 
@@ -116,14 +116,6 @@ export function AppProvider({ children }) {
     },
     [endpoint, token, setEndpoint, setToken]
   )
-
-  // Auto-connect on mount when endpoint is already stored/env-provided
-  useEffect(() => {
-    if (endpoint && oasStatus === 'idle') {
-      fetchOasSpec(endpoint, token)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // intentionally runs only on mount
 
   /** Called from SetupScreen — stores credentials then fetches spec */
   const connect = useCallback(
