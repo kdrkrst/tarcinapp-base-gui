@@ -117,7 +117,7 @@ export default function VisualFilterBuilder({ expr, onChange }) {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700/60 min-h-[38px]">
-      <span className="text-[10px] text-slate-600 font-mono uppercase tracking-wider shrink-0">filter</span>
+      <span className="text-[10px] text-slate-600 font-mono uppercase tracking-wider shrink-0">sets</span>
       <span className="text-slate-700 text-xs shrink-0">›</span>
       {tokens.map((token, i) => {
         if (token.type === 'set') {
