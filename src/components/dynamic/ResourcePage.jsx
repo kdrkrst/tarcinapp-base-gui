@@ -402,6 +402,15 @@ export default function ResourcePage() {
   const navigate = useNavigate()
   const { oasSpec, endpoint, token } = useApp()
   const { get, getWithMeta, post, patch, del } = useApiClient()
+  // Decoded JWT claims — used to pre-fill userIds / groupIds in object-set inputs
+  const jwtClaims = useMemo(() => parseJwt(token), [token])
+  const jwtSub = jwtClaims?.sub ?? null
+  const jwtGroups = useMemo(() => {
+    const raw = jwtClaims?.groups ?? jwtClaims?.group ?? null
+    if (!raw) return null
+    const arr = Array.isArray(raw) ? raw : [raw]
+    return arr.length > 0 ? arr : null
+  }, [jwtClaims])
   // filterBuilderExpr: FilterExpr AST (null = no set filter)
   const [filterBuilderExpr, setFilterBuilderExpr] = useState(null)
   // staged selections in the Sets dropdown (array of keys)
@@ -1420,7 +1429,24 @@ export default function ResourcePage() {
                             {isStaged && meta.isObject && (
                               <div className="ml-5 mt-2 space-y-2">
                                 <div>
-                                  <p className="text-[10px] text-slate-500 mb-0.5">userIds</p>
+                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                    <p className="text-[10px] text-slate-500">userIds</p>
+                                    {jwtSub && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setStagedSetMeta((prev) => {
+                                          const cur = prev[key]?.userIds ?? ''
+                                          const existing = cur.split(',').map((s) => s.trim()).filter(Boolean)
+                                          if (existing.includes(jwtSub)) return prev
+                                          const next = [...existing, jwtSub].join(', ')
+                                          return { ...prev, [key]: { ...prev[key], userIds: next } }
+                                        })}
+                                        className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                                      >
+                                        add me
+                                      </button>
+                                    )}
+                                  </div>
                                   <input
                                     type="text"
                                     value={stagedSetMeta[key]?.userIds ?? ''}
@@ -1430,7 +1456,25 @@ export default function ResourcePage() {
                                   />
                                 </div>
                                 <div>
-                                  <p className="text-[10px] text-slate-500 mb-0.5">groupIds</p>
+                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                    <p className="text-[10px] text-slate-500">groupIds</p>
+                                    {jwtGroups && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setStagedSetMeta((prev) => {
+                                          const cur = prev[key]?.groupIds ?? ''
+                                          const existing = cur.split(',').map((s) => s.trim()).filter(Boolean)
+                                          const toAdd = jwtGroups.filter((g) => !existing.includes(g))
+                                          if (!toAdd.length) return prev
+                                          const next = [...existing, ...toAdd].join(', ')
+                                          return { ...prev, [key]: { ...prev[key], groupIds: next } }
+                                        })}
+                                        className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                                      >
+                                        add my groups
+                                      </button>
+                                    )}
+                                  </div>
                                   <input
                                     type="text"
                                     value={stagedSetMeta[key]?.groupIds ?? ''}
