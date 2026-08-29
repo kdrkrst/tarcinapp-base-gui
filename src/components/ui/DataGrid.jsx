@@ -1151,6 +1151,71 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const [hoveredRow, setHoveredRow] = useState(null)
   const [colTooltip, setColTooltip] = useState(null)
   const [expandedRowId, setExpandedRowId] = useState(null)
+
+  // Column reorder state
+  const [colOrder, setColOrder] = useState(() => columns.map((c) => c.key))
+  const dragColRef = useRef(null)        // key being dragged
+  const dragOverColRef = useRef(null)    // key of the current drop target
+  const didDragRef = useRef(false)       // true if a real drag happened (suppress sort click)
+  const [dragOverKey, setDragOverKey] = useState(null) // for drop-indicator styling
+
+  // Keep colOrder in sync when columns prop changes (fields added/removed)
+  useEffect(() => {
+    setColOrder((prev) => {
+      const incoming = columns.map((c) => c.key)
+      // Preserve existing order for keys still present; append new keys at the end
+      const kept = prev.filter((k) => incoming.includes(k))
+      const added = incoming.filter((k) => !kept.includes(k))
+      return [...kept, ...added]
+    })
+  }, [columns])
+
+  // Derive ordered columns for rendering
+  const orderedColumns = colOrder
+    .map((key) => columns.find((c) => c.key === key))
+    .filter(Boolean)
+
+  // Drag handlers
+  const handleColDragStart = (e, key) => {
+    dragColRef.current = key
+    didDragRef.current = false
+    e.dataTransfer.effectAllowed = 'move'
+    // Minimal ghost — browser default is fine; just suppress the large table ghost
+    e.dataTransfer.setData('text/plain', key)
+  }
+  const handleColDragEnter = (e, key) => {
+    e.preventDefault()
+    if (key === dragColRef.current) return
+    dragOverColRef.current = key
+    setDragOverKey(key)
+    didDragRef.current = true
+  }
+  const handleColDragOver = (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+  const handleColDrop = (e, key) => {
+    e.preventDefault()
+    const from = dragColRef.current
+    if (!from || from === key) return
+    setColOrder((prev) => {
+      const next = [...prev]
+      const fromIdx = next.indexOf(from)
+      const toIdx = next.indexOf(key)
+      if (fromIdx === -1 || toIdx === -1) return prev
+      next.splice(fromIdx, 1)
+      next.splice(toIdx, 0, from)
+      return next
+    })
+    dragColRef.current = null
+    dragOverColRef.current = null
+    setDragOverKey(null)
+  }
+  const handleColDragEnd = () => {
+    dragColRef.current = null
+    dragOverColRef.current = null
+    setDragOverKey(null)
+  }
   const [pendingDeleteRow, setPendingDeleteRow] = useState(null)
   const [pendingActivateRow, setPendingActivateRow] = useState(null)
   const [pendingDeactivateRow, setPendingDeactivateRow] = useState(null)
@@ -1372,23 +1437,39 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-slate-800/60 border-b border-slate-700">
-            {columns.map((col) => {
+            {orderedColumns.map((col) => {
               const sortEntry = sortOrder?.find((s) => s.field === col.key)
               const isSorted = !!sortEntry
+              const isDropTarget = dragOverKey === col.key
               return (
               <th
                 key={col.key}
+                draggable
+                onDragStart={(e) => handleColDragStart(e, col.key)}
+                onDragEnter={(e) => handleColDragEnter(e, col.key)}
+                onDragOver={handleColDragOver}
+                onDrop={(e) => handleColDrop(e, col.key)}
+                onDragEnd={handleColDragEnd}
                 className={`text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap select-none transition-colors ${
-                  onSortColumn ? 'cursor-pointer hover:bg-slate-700/50' : 'cursor-default'
-                } ${isSorted ? 'text-blue-400' : 'text-slate-400'}`}
-                onClick={onSortColumn ? () => onSortColumn(col.key) : undefined}
+                  onSortColumn ? 'cursor-grab hover:bg-slate-700/50' : 'cursor-grab hover:bg-slate-700/50'
+                } ${isSorted ? 'text-blue-400' : 'text-slate-400'}${isDropTarget ? ' border-l-2 border-l-blue-500' : ''}`}
+                onClick={() => {
+                  if (didDragRef.current) { didDragRef.current = false; return }
+                  if (onSortColumn) onSortColumn(col.key)
+                }}
                 onMouseEnter={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect()
                   setColTooltip({ key: col.key, x: rect.left, y: rect.bottom + 4 })
                 }}
                 onMouseLeave={() => setColTooltip(null)}
               >
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1.5">
+                  {/* drag handle dots */}
+                  <svg className="w-2.5 h-2.5 flex-shrink-0 opacity-30 group-hover:opacity-60" viewBox="0 0 8 14" fill="currentColor" aria-hidden="true">
+                    <circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/>
+                    <circle cx="2" cy="7" r="1.2"/><circle cx="6" cy="7" r="1.2"/>
+                    <circle cx="2" cy="12" r="1.2"/><circle cx="6" cy="12" r="1.2"/>
+                  </svg>
                   {col.label}
                   {isSorted ? (
                     sortEntry.dir === 'ASC' ? (
@@ -1442,7 +1523,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
               className={`group transition-colors hover:bg-slate-800/40 cursor-pointer${status === 'expired' ? ' opacity-60' : ''}`}
               onClick={() => setExpandedRowId(isExpanded ? null : rowId)}
             >
-              {columns.map((col, colIdx) => (
+              {orderedColumns.map((col, colIdx) => (
                 <td
                   key={col.key}
                   className="px-4 py-3 text-slate-300 whitespace-nowrap max-w-[220px] truncate"
