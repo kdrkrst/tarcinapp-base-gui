@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import ConfirmDialog from './ConfirmDialog'
 import ItemEditModal from './ItemEditModal'
 import { useApiClient } from '../../services/apiClient'
+import { isResolvableValue, parseTappUri } from '../../utils/oasParser'
 
 // ─── Managed fields registry ───────────────────────────────────────────────
 const MANAGED_FIELDS_META = {
@@ -174,8 +175,17 @@ const ACCESS_FIELDS = new Set([
   '_viewerUsers', '_viewerGroups', '_viewerUsersCount', '_viewerGroupsCount',
 ])
 
-function FieldRow({ fieldKey, meta, value }) {
+function shortIdLocal(id) {
+  if (!id) return '—'
+  if (id.length <= 14) return id
+  return `${id.slice(0, 6)}...${id.slice(-4)}`
+}
+
+function FieldRow({ fieldKey, meta, value, onResolve, onViewRecord }) {
   const [objectExpanded, setObjectExpanded] = useState(false)
+  const [resolveState, setResolveState] = useState(null) // null | { loading: true } | { loading: false, objects: object[] }
+  const [hovered, setHovered] = useState(false)
+
   const detectedType = meta?.type
     ?? (Array.isArray(value) ? 'array'
       : typeof value === 'object' && value !== null ? 'object'
@@ -190,18 +200,89 @@ function FieldRow({ fieldKey, meta, value }) {
   }
 
   const isExpandableObj = detectedType === 'object' && typeof value === 'object' && value !== null
+  const isResolvable = !!onResolve && isResolvableValue(value)
+  const isResolving = resolveState?.loading === true
+  const resolvedObjects = resolveState?.loading === false ? resolveState.objects : null
+
+  const handleResolveClick = async () => {
+    if (!onResolve || isResolving) return
+    setResolveState({ loading: true })
+    try {
+      const objects = await onResolve(fieldKey)
+      setResolveState({ loading: false, objects: objects ?? [] })
+    } catch {
+      setResolveState({ loading: false, objects: [] })
+    }
+  }
 
   return (
     <div className="py-1 min-w-0">
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
         <span className={`flex-shrink-0 ${TYPE_COLOR[detectedType] ?? 'text-slate-500'}`}>
           <TypeIcon type={detectedType} />
         </span>
-        <span className="text-slate-500 text-[11px] font-mono flex-shrink-0 w-36 truncate" title={fieldKey}>
-          {fieldKey}
+        <span className="inline-flex items-center gap-1 flex-shrink-0 w-36">
+          <span className="text-slate-500 text-[11px] font-mono truncate" title={fieldKey}>
+            {fieldKey}
+          </span>
+          {isResolvable && (
+            <button
+              type="button"
+              onClick={handleResolveClick}
+              disabled={isResolving}
+              className={`inline-flex items-center justify-center w-3.5 h-3.5 rounded transition-colors flex-shrink-0 ${
+                resolvedObjects
+                  ? 'text-violet-400'
+                  : hovered
+                  ? 'text-slate-400 hover:text-violet-400'
+                  : 'text-transparent'
+              }`}
+              title="Resolve references"
+              aria-label="Resolve references"
+            >
+              {isResolving ? (
+                <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              ) : (
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              )}
+            </button>
+          )}
         </span>
         <span className="min-w-0">
-          {isExpandableObj ? (
+          {resolvedObjects && resolvedObjects.length > 0 ? (
+            <span className="flex flex-wrap gap-1">
+              {resolvedObjects.map((obj, idx) => {
+                const objId = obj._id ?? obj.id ?? ''
+                const rawVal = value
+                const uris = Array.isArray(rawVal) ? rawVal : [rawVal]
+                const matchingUri = uris[idx] ?? uris[0] ?? ''
+                const parsed = parseTappUri(matchingUri)
+                const recordType = parsed?.recordType
+                  ? parsed.recordType.charAt(0).toUpperCase() + parsed.recordType.slice(1)
+                  : (obj._kind ? obj._kind.charAt(0).toUpperCase() + obj._kind.slice(1) : 'Ref')
+                const chipLabel = `${recordType}:${shortIdLocal(objId)}`
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => onViewRecord?.(obj)}
+                    className="inline-flex items-center px-1.5 py-0.5 rounded border border-violet-700/60 bg-violet-900/30 text-violet-300 hover:bg-violet-800/50 hover:text-violet-100 font-mono text-[10px] transition-colors"
+                    title={objId}
+                  >
+                    {chipLabel}
+                  </button>
+                )
+              })}
+            </span>
+          ) : resolvedObjects && resolvedObjects.length === 0 ? (
+            <span className="text-slate-600 italic text-[11px]">no objects resolved</span>
+          ) : isExpandableObj ? (
             <button
               type="button"
               onClick={() => setObjectExpanded((v) => !v)}
@@ -217,7 +298,7 @@ function FieldRow({ fieldKey, meta, value }) {
           )}
         </span>
       </div>
-      {isExpandableObj && objectExpanded && (
+      {isExpandableObj && objectExpanded && !resolvedObjects && (
         <pre className="ml-6 mt-1 text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
           {JSON.stringify(value, null, 2)}
         </pre>
@@ -283,7 +364,7 @@ function ResizableColumns({ columns }) {
   )
 }
 
-function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete }) {
+function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete, onResolveField, onViewRecord }) {
   const accessFields = []
   const otherFields = []
   const nonManagedFields = []
@@ -312,26 +393,41 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete })
 
   if (nonManagedFields.length === 0 && accessFields.length === 0 && otherFields.length === 0) return null
 
+  // Build a per-fieldKey resolve callback bound to the current row.
+  // onResolveField(fieldKey, rows) returns Map<rowId, object[]>; unwrap for this single row.
+  const rowId = row._id ?? row.id
+  const makeResolve = onResolveField
+    ? (_fieldKey) => async (fk) => {
+        const map = await onResolveField(fk, [row])
+        return map?.get(rowId) ?? []
+      }
+    : null
+
+  const renderField = ({ key, meta, value }) => (
+    <FieldRow
+      key={key}
+      fieldKey={key}
+      meta={meta}
+      value={value}
+      onResolve={makeResolve ? makeResolve(key) : undefined}
+      onViewRecord={onViewRecord}
+    />
+  )
+
   return (
     <div className="bg-slate-950/60 border-t border-slate-700/40 px-4 py-2.5">
       <ResizableColumns columns={[
         ...(nonManagedFields.length > 0 ? [{
           id: 'fields', header: 'Fields', defaultWidth: 280,
-          content: nonManagedFields.map(({ key, meta, value }) => (
-            <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-          )),
+          content: nonManagedFields.map(renderField),
         }] : []),
         ...(otherFields.length > 0 ? [{
           id: 'record', header: 'Record', defaultWidth: 440,
-          content: otherFields.map(({ key, meta, value }) => (
-            <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-          )),
+          content: otherFields.map(renderField),
         }] : []),
         ...(accessFields.length > 0 ? [{
           id: 'access', header: 'Access & Visibility', defaultWidth: 288,
-          content: accessFields.map(({ key, meta, value }) => (
-            <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-          )),
+          content: accessFields.map(renderField),
         }] : []),
       ]} />
       <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-800/70 -mx-4 px-4">
@@ -391,7 +487,7 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete })
 
 const TRAVERSAL_PAGE_SIZE = 10
 
-function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFetchRelation, recordTypeLabel }) {
+function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFetchRelation, recordTypeLabel, onResolveField, onViewRecord }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [fullRelation, setFullRelation] = useState(null)
   const [fullRelationLoading, setFullRelationLoading] = useState(false)
@@ -579,7 +675,27 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
         )}
       </div>
       {/* Expanded fields view */}
-      {isExpanded && (
+      {isExpanded && (() => {
+        // Build per-fieldKey resolve closure bound to this item.
+        // onResolveField(fieldKey, [item]) returns Map<itemId, object[]>; unwrap for this item.
+        const itemId = item._id ?? item.id
+        const makeResolve = onResolveField
+          ? (_fk) => async (fk) => {
+              const map = await onResolveField(fk, [item])
+              return map?.get(itemId) ?? []
+            }
+          : null
+        const renderField = ({ key, meta, value }) => (
+          <FieldRow
+            key={key}
+            fieldKey={key}
+            meta={meta}
+            value={value}
+            onResolve={makeResolve ? makeResolve(key) : undefined}
+            onViewRecord={onViewRecord}
+          />
+        )
+        return (
         <div className="border-t border-slate-800 bg-slate-950/40">
           {/* Relation metadata section */}
           {relationMeta && (
@@ -588,21 +704,15 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
               <ResizableColumns columns={[
                 ...(relNonManagedFields.length > 0 ? [{
                   id: 'fields', header: 'Fields', defaultWidth: 280,
-                  content: relNonManagedFields.map(({ key, meta, value }) => (
-                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                  )),
+                  content: relNonManagedFields.map(renderField),
                 }] : []),
                 ...(relOtherFields.length > 0 ? [{
                   id: 'details', header: 'Details', defaultWidth: 440,
-                  content: relOtherFields.map(({ key, meta, value }) => (
-                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                  )),
+                  content: relOtherFields.map(renderField),
                 }] : []),
                 ...(relAccessFields.length > 0 ? [{
                   id: 'access', header: 'Access & Visibility', defaultWidth: 288,
-                  content: relAccessFields.map(({ key, meta, value }) => (
-                    <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                  )),
+                  content: relAccessFields.map(renderField),
                 }] : []),
               ]} />
               {onFetchRelation && relationMeta._id && (
@@ -636,26 +746,21 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
             <ResizableColumns columns={[
               ...(nonManagedFields.length > 0 ? [{
                 id: 'fields', header: 'Fields', defaultWidth: 280,
-                content: nonManagedFields.map(({ key, meta, value }) => (
-                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                )),
+                content: nonManagedFields.map(renderField),
               }] : []),
               ...(otherFields.length > 0 ? [{
                 id: 'record', header: 'Record', defaultWidth: 440,
-                content: otherFields.map(({ key, meta, value }) => (
-                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                )),
+                content: otherFields.map(renderField),
               }] : []),
               ...(accessFields.length > 0 ? [{
                 id: 'access', header: 'Access & Visibility', defaultWidth: 288,
-                content: accessFields.map(({ key, meta, value }) => (
-                  <FieldRow key={key} fieldKey={key} meta={meta} value={value} />
-                )),
+                content: accessFields.map(renderField),
               }] : []),
             ]} />
           </div>
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
@@ -675,6 +780,8 @@ function ExpandedRowPanel({
   traversalSortDir, onTraversalSortDirChange,
   traversalVisibleFields, onTraversalVisibleFieldsChange,
   onFetchRelation,
+  onResolveField, onViewRecord,
+  onResolveTraversalField,
 }) {
   const displayRecord = fullRecord ?? row
   const title = displayRecord._name ?? displayRecord._kind ?? null
@@ -880,6 +987,8 @@ function ExpandedRowPanel({
           onActivate={onActivate}
           onDeactivate={onDeactivate}
           onDelete={onDelete}
+          onResolveField={onResolveField}
+          onViewRecord={onViewRecord}
         />
       ) : (
         <div>
@@ -898,7 +1007,15 @@ function ExpandedRowPanel({
           ) : (
             <div>
               <div className="px-3 py-1.5 flex flex-col gap-1">
-                {traversalData.map((item, idx) => (
+                {traversalData.map((item, idx) => {
+                  // Build a resolver bound to this traversal's path template.
+                  // This ensures the lookup uses the traversal resource's own item endpoint
+                  // (e.g. /lists/bookshelves/{id}) rather than the parent resource's endpoint.
+                  const traversalPathTemplate = selectedTraversal?.pathTemplate
+                  const resolveForItem = onResolveTraversalField && traversalPathTemplate
+                    ? (fieldKey, rows) => onResolveTraversalField(fieldKey, rows, traversalPathTemplate)
+                    : onResolveField
+                  return (
                   <RelatedItemCard
                     key={item._id ?? idx}
                     item={item}
@@ -908,8 +1025,11 @@ function ExpandedRowPanel({
                     visibleFields={traversalVisibleFields}
                     onFetchRelation={onFetchRelation}
                     recordTypeLabel={traversalItemTypeLabel}
+                    onResolveField={resolveForItem}
+                    onViewRecord={onViewRecord}
                   />
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1022,7 +1142,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList, externalRefreshKey = 0, relateTraversalIds = null }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList, onResolveField, onResolveTraversalField, externalRefreshKey = 0, relateTraversalIds = null }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -1070,8 +1190,6 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const expandedRow = data?.find((r, i) => (r._id ?? i) === expandedRowId) ?? null
 
   const actionColWidth = Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate, hasTraversals ? true : null].filter(Boolean).length * 36)
-
-
 
   // Reset expansion state when the expanded row changes
   useEffect(() => {
@@ -1578,6 +1696,16 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       traversalVisibleFields={traversalVisibleFields}
                       onTraversalVisibleFieldsChange={setTraversalVisibleFields}
                       onFetchRelation={onFetchRelatedRecord}
+                      onResolveField={onResolveField}
+                      onResolveTraversalField={onResolveTraversalField}
+                      onViewRecord={onResolveField && onFetchRelatedRecord ? (record) => {
+                        const id = record._id ?? record.id
+                        if (!id) return
+                        setRelatedRecordModal({ loading: true, record: null, navItem: null, error: null })
+                        onFetchRelatedRecord(id)
+                          .then((result) => setRelatedRecordModal({ loading: false, record: result?.record ?? record, navItem: result?.navItem ?? null, error: null }))
+                          .catch(() => setRelatedRecordModal({ loading: false, record, navItem: null, error: null }))
+                      } : undefined}
                     />
                   </div>
                 </td>

@@ -396,3 +396,34 @@ export function getPostBodySchema(spec, collectionPath) {
   if (schema.$ref) schema = resolveRef(spec, schema.$ref)
   return schema ?? null
 }
+
+/**
+ * Returns true if the value is a tapp:// reference URI.
+ * Format: tapp://{hostname}/{recordtype}/{recordId}
+ */
+export function isTappUri(val) {
+  return typeof val === 'string' && val.startsWith('tapp://')
+}
+
+/**
+ * Returns true if a field value (scalar or array) contains at least one tapp:// URI.
+ */
+export function isResolvableValue(val) {
+  if (Array.isArray(val)) return val.some((v) => isTappUri(v))
+  return isTappUri(val)
+}
+
+/**
+ * Parse a tapp:// URI into its parts.
+ * Returns { hostname, recordType, recordId } or null if invalid.
+ */
+export function parseTappUri(uri) {
+  if (!isTappUri(uri)) return null
+  // tapp://hostname/recordtype/recordId
+  const withoutScheme = uri.slice('tapp://'.length)
+  const parts = withoutScheme.split('/')
+  if (parts.length < 3) return null
+  const [hostname, recordType, ...rest] = parts
+  const recordId = rest.join('/')
+  return { hostname, recordType, recordId }
+}

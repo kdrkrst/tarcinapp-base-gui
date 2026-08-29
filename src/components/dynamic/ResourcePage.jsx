@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, Outlet } from 'react-router-dom'
 import { useApp } from '../../context/AppContext'
-import { parseOasSpec, deriveColumns, resolvePaginationQueryKeys, getPostBodySchema } from '../../utils/oasParser'
+import { parseOasSpec, deriveColumns, resolvePaginationQueryKeys, getPostBodySchema, isResolvableValue } from '../../utils/oasParser'
 import { useApiClient } from '../../services/apiClient'
 import { useResourceList } from '../../hooks/useResourceList'
 import DataGrid from '../ui/DataGrid'
@@ -997,6 +997,54 @@ export default function ResourcePage() {
     }
     return null
   }, [get, navItems])
+
+  // Shared core: resolve a reference field for a set of rows using a known itemPathTemplate.
+  const resolveFieldWithTemplate = useCallback(async (fieldKey, rows, itemPathTemplate) => {
+    const results = new Map()
+    await Promise.all(
+      rows.map(async (row) => {
+        const rowId = row._id ?? row.id
+        if (!rowId) return
+        if (!isResolvableValue(row[fieldKey])) return
+        try {
+          const path = buildItemPath(itemPathTemplate, rowId)
+          const resolved = await get(`${path}?filter[lookup][0][prop]=${encodeURIComponent(fieldKey)}`)
+          if (resolved && resolved[fieldKey] !== undefined) {
+            const fieldVal = resolved[fieldKey]
+            const objects = Array.isArray(fieldVal) ? fieldVal : [fieldVal]
+            const populated = objects.filter((o) => o && typeof o === 'object')
+            results.set(rowId, populated)
+          }
+        } catch { /* skip rows that fail */ }
+      })
+    )
+    return results
+  }, [get])
+
+  // Resolve a reference field for rows of the top-level resource.
+  const handleResolveField = useCallback(async (fieldKey, rows) => {
+    if (!navItem?.itemPathTemplate || !navItem?.itemMethods?.includes('get')) return new Map()
+    return resolveFieldWithTemplate(fieldKey, rows, navItem.itemPathTemplate)
+  }, [resolveFieldWithTemplate, navItem?.itemPathTemplate, navItem?.itemMethods])
+
+  // Resolve a reference field for traversal items.
+  // Finds the navItem whose collectionPath matches the traversal subResource, then uses its itemPathTemplate.
+  const handleResolveTraversalField = useCallback(async (fieldKey, rows, traversalPathTemplate) => {
+    if (!traversalPathTemplate) return new Map()
+    // Extract the subResource path from the traversal path template, e.g.
+    // "/api/v1/entities/books/{id}/lists/bookshelves" → "lists/bookshelves"
+    const subResourceMatch = traversalPathTemplate.match(/\{[^}]+\}\/(.+)$/)
+    const subResource = subResourceMatch?.[1] ?? ''
+    // Find the navItem whose collectionPath ends with the subResource
+    const lastSeg = subResource.split('/').pop()
+    const traversalNavItem = navItems.find((n) => {
+      if (!n.itemPathTemplate || !n.itemMethods?.includes('get')) return false
+      const path = n.collectionPath ?? ''
+      return path.endsWith(`/${subResource}`) || path.endsWith(`/${lastSeg}`)
+    })
+    if (!traversalNavItem) return new Map()
+    return resolveFieldWithTemplate(fieldKey, rows, traversalNavItem.itemPathTemplate)
+  }, [resolveFieldWithTemplate, navItems])
 
   const handleSortColumn = useCallback((field) => {
     setSortOrder((prev) => {
@@ -2151,6 +2199,8 @@ export default function ResourcePage() {
           onTraversalDeleteAll={handleTraversalDeleteAll}
           onTraversalPatchAll={handleTraversalPatchAll}
           onFetchRelatedRecord={handleFetchRelatedRecord}
+          onResolveField={navItem?.itemPathTemplate && navItem?.itemMethods?.includes('get') ? handleResolveField : undefined}
+          onResolveTraversalField={handleResolveTraversalField}
           onTraversalRelateToList={handleTraversalRelateToList}
           relateTraversalIds={relateTraversalIds}
           externalRefreshKey={traversalRefreshSignal}
