@@ -450,9 +450,11 @@ export default function ResourcePage() {
   const [qDropdownOpen, setQDropdownOpen] = useState(false)
   const [fieldsetDropdownOpen, setFieldsetDropdownOpen] = useState(false)
   const [setsDropdownOpen, setSetsDropdownOpen] = useState(false)
+  const [fieldDropdownOpen, setFieldDropdownOpen] = useState(false)
   const qDropdownRef = useRef(null)
   const fieldsetDropdownRef = useRef(null)
   const setsDropdownRef = useRef(null)
+  const fieldDropdownRef = useRef(null)
   const isResizing = useRef(false)
   const resizeStartX = useRef(0)
   const resizeStartWidth = useRef(0)
@@ -654,6 +656,13 @@ export default function ResourcePage() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [setsDropdownOpen])
+
+  useEffect(() => {
+    if (!fieldDropdownOpen) return undefined
+    const handler = (e) => { if (fieldDropdownRef.current && !fieldDropdownRef.current.contains(e.target)) setFieldDropdownOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [fieldDropdownOpen])
 
   useEffect(() => {
     if (!toastError) return undefined
@@ -1752,80 +1761,96 @@ export default function ResourcePage() {
           )}
 
           {/* Column selector */}
-          {showFieldSelector && (
-            <>
-              <hr className="border-slate-700" />
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Columns</p>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setFieldSelectorState({ mode: 'all', selected: new Set() })} className="text-xs text-slate-400 hover:text-slate-200 underline">Select all</button>
-                    <button onClick={() => setFieldSelectorState({ mode: 'none', selected: new Set() })} className="text-xs text-slate-400 hover:text-slate-200 underline">Deselect all</button>
+          {showFieldSelector && (() => {
+            const checkedCount = fieldSelectorState.mode === 'all'
+              ? availableFields.length
+              : fieldSelectorState.mode === 'none'
+                ? 0
+                : fieldSelectorState.mode === 'include'
+                  ? fieldSelectorState.selected.size
+                  : availableFields.length - fieldSelectorState.selected.size
+            const triggerLabel = fieldSelectorState.mode === 'all'
+              ? 'All fields'
+              : checkedCount === 0
+                ? 'No fields'
+                : `${checkedCount} field${checkedCount !== 1 ? 's' : ''}`
+            const filteredFields = fieldSearch
+              ? availableFields.filter((f) => f.toLowerCase().includes(fieldSearch.toLowerCase()))
+              : availableFields
+            return (
+              <>
+                <hr className="border-slate-700" />
+                <div className="space-y-1.5">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Fields</p>
+                  <div className="flex items-center gap-2" ref={fieldDropdownRef}>
+                    <p className="text-[10px] text-slate-500 shrink-0">Retrieved Fields</p>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setFieldDropdownOpen((v) => !v)}
+                        className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                      >
+                        <span className={fieldSelectorState.mode === 'all' ? 'text-slate-400' : 'text-blue-300'}>{triggerLabel}</span>
+                        <svg className={`w-3 h-3 text-slate-500 transition-transform shrink-0 ${fieldDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                        </svg>
+                      </button>
+                      {fieldDropdownOpen && (
+                      <div className="absolute z-30 mt-1 w-full min-w-[200px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                        {/* Search */}
+                        <div className="relative border-b border-slate-700">
+                          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
+                          </svg>
+                          <input
+                            type="text"
+                            value={fieldSearch}
+                            onChange={(e) => setFieldSearch(e.target.value)}
+                            placeholder="Filter fields…"
+                            className="w-full pl-7 pr-7 py-1.5 text-xs bg-transparent text-slate-200 placeholder-slate-500 focus:outline-none"
+                          />
+                          {fieldSearch && (
+                            <button onClick={() => setFieldSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label="Clear search">
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                        {/* Select all / none */}
+                        <div className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-700/60">
+                          <button onClick={() => setFieldSelectorState({ mode: 'all', selected: new Set() })} className="text-[10px] text-slate-400 hover:text-slate-200 underline">All</button>
+                          <button onClick={() => setFieldSelectorState({ mode: 'none', selected: new Set() })} className="text-[10px] text-slate-400 hover:text-slate-200 underline">None</button>
+                        </div>
+                        {/* Options */}
+                        <div className="max-h-52 overflow-y-auto py-1">
+                          {availableFields.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">No fields found.</p>
+                          ) : filteredFields.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">No match for &ldquo;{fieldSearch}&rdquo;.</p>
+                          ) : filteredFields.map((field) => {
+                            const checked = isFieldChecked(field, fieldSelectorState)
+                            return (
+                              <label key={field} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-slate-800 group">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => setFieldSelectorState((prev) => toggleFieldSelection(field, availableFields, prev))}
+                                  className="w-3.5 h-3.5 rounded accent-blue-500 cursor-pointer shrink-0"
+                                />
+                                <span className="text-xs font-mono text-slate-300 group-hover:text-white truncate">{field}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-
-                {/* Search within fields */}
-                <div className="relative">
-                  <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
-                  </svg>
-                  <input
-                    type="text"
-                    value={fieldSearch}
-                    onChange={(e) => setFieldSearch(e.target.value)}
-                    placeholder="Filter fields…"
-                    className="w-full pl-7 pr-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  />
-                  {fieldSearch && (
-                    <button onClick={() => setFieldSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label="Clear field search">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-
-                {availableFields.length === 0 ? (
-                  <p className="text-xs text-slate-500">No fields found in schema or response.</p>
-                ) : (() => {
-                  const filtered = fieldSearch
-                    ? availableFields.filter((f) => f.toLowerCase().includes(fieldSearch.toLowerCase()))
-                    : availableFields
-                  return filtered.length === 0 ? (
-                    <p className="text-xs text-slate-500">No fields match &ldquo;{fieldSearch}&rdquo;.</p>
-                  ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-2">
-                      {filtered.map((field) => {
-                        const checked = isFieldChecked(field, fieldSelectorState)
-                        return (
-                          <label key={field} className="flex items-center gap-2 cursor-pointer group">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => setFieldSelectorState((prev) => toggleFieldSelection(field, availableFields, prev))}
-                              className="w-3.5 h-3.5 rounded accent-blue-500 cursor-pointer"
-                            />
-                            <span className="text-xs font-mono text-slate-300 group-hover:text-white truncate">{field}</span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  )
-                })()}
-
-                {fieldSelectorState.mode !== 'all' && fieldSelectorState.mode !== 'none' && (
-                  <p className="text-[10px] text-slate-500 font-mono">
-                    {fieldSelectorState.mode === 'exclude'
-                      ? `Excluding: ${[...fieldSelectorState.selected].join(', ')}`
-                      : `Including only: ${[...fieldSelectorState.selected].join(', ')}`}
-                  </p>
-                )}
-                {fieldSelectorState.mode === 'none' && (
-                  <p className="text-[10px] text-slate-500 font-mono">No fields selected — no filter[fields] parameter added.</p>
-                )}
-              </div>
-            </>
-          )}
+              </>
+            )
+          })()}
 
           {/* Sort */}
           {navItem.hasFilterOrder && (
