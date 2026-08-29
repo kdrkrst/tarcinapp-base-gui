@@ -364,7 +364,7 @@ function ResizableColumns({ columns }) {
   )
 }
 
-function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete, onResolveField, onViewRecord }) {
+function ManagedFieldsPanel({ row, onEdit, onActivate, activateLabel, onDeactivate, onDelete, onResolveField, onViewRecord }) {
   const accessFields = []
   const otherFields = []
   const nonManagedFields = []
@@ -441,7 +441,7 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, onDeactivate, onDelete, o
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                Activate
+                {activateLabel ?? 'Activate'}
               </button>
             )}
             {onActivate && onDeactivate && <span className="w-px bg-slate-700" />}
@@ -773,7 +773,7 @@ function ExpandedRowPanel({
   onTraversalPrev, onTraversalNext,
   onAddItem, onDeleteAll, onUpdateAll,
   copiedId, onCopyId,
-  onEdit, onActivate, onDeactivate, onDelete,
+  onEdit, onActivate, activateLabel, onDeactivate, onDelete,
   onViewTraversalItem,
   traversalStatusFilter, onTraversalStatusFilterChange,
   traversalVisibilityFilter, onTraversalVisibilityFilterChange,
@@ -986,6 +986,7 @@ function ExpandedRowPanel({
           row={displayRecord}
           onEdit={onEdit}
           onActivate={onActivate}
+          activateLabel={activateLabel}
           onDeactivate={onDeactivate}
           onDelete={onDelete}
           onResolveField={onResolveField}
@@ -1531,8 +1532,8 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       <button
                         onClick={(e) => { e.stopPropagation(); setPendingActivateRow(row) }}
                         className="p-1.5 text-slate-600 hover:text-emerald-400 hover:bg-emerald-900/30 transition-colors"
-                        title="Activate (set valid from now)"
-                        aria-label="Activate"
+                        title={row._validFromDateTime && row._validUntilDateTime ? 'Reactivate (clear valid-until date)' : 'Activate (set valid from now)'}
+                        aria-label={row._validFromDateTime && row._validUntilDateTime ? 'Reactivate' : 'Activate'}
                       >
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1673,6 +1674,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       }}
                       onEdit={onRowClick ? () => onRowClick(row) : undefined}
                       onActivate={onRowActivate ? () => setPendingActivateRow(row) : undefined}
+                      activateLabel={onRowActivate && row._validFromDateTime && row._validUntilDateTime ? 'Reactivate' : 'Activate'}
                       onDeactivate={onRowDeactivate && computeRowStatus(row) === 'active' ? () => setPendingDeactivateRow(row) : undefined}
                       onDelete={onRowDelete ? () => setPendingDeleteRow(row) : undefined}
                       onViewTraversalItem={onFetchRelatedRecord ? (item) => {
@@ -1728,9 +1730,13 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
       />
       <ConfirmDialog
         open={pendingActivateRow !== null}
-        title="Activate record?"
-        message="This will set the valid-from date to now. You can undo this later by editing the field."
-        confirmLabel="Yes, activate"
+        title={pendingActivateRow?._validFromDateTime && pendingActivateRow?._validUntilDateTime ? 'Reactivate record?' : 'Activate record?'}
+        message={
+          pendingActivateRow?._validFromDateTime && pendingActivateRow?._validUntilDateTime
+            ? 'This will clear the valid-until date, making the record active again. You can undo this later by editing the field.'
+            : 'This will set the valid-from date to now. You can undo this later by editing the field.'
+        }
+        confirmLabel={pendingActivateRow?._validFromDateTime && pendingActivateRow?._validUntilDateTime ? 'Yes, reactivate' : 'Yes, activate'}
         confirmVariant="success"
         onConfirm={() => { onRowActivate(pendingActivateRow); setPendingActivateRow(null) }}
         onCancel={() => setPendingActivateRow(null)}

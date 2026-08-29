@@ -785,7 +785,11 @@ export default function ResourcePage() {
         setToastError(null)
         const id = row?._id ?? row?.id
         if (!id || !navItem?.itemPathTemplate) return
-        await patch(buildItemPath(navItem.itemPathTemplate, id), { _validFromDateTime: new Date().toISOString() })
+        const bothEmpty = !row._validFromDateTime && !row._validUntilDateTime
+        const payload = bothEmpty
+          ? { _validFromDateTime: new Date().toISOString() }
+          : { _validUntilDateTime: null }
+        await patch(buildItemPath(navItem.itemPathTemplate, id), payload)
         await refresh()
       } catch (err) {
         setToastError(err?.message ?? 'Activate failed')

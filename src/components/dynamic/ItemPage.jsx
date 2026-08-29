@@ -640,9 +640,13 @@ export default function ItemPage() {
   async function handleActivate() {
     setActivating(true)
     try {
-      await api.patch(itemPath, { _validFromDateTime: new Date().toISOString() })
+      const bothEmpty = !item._validFromDateTime && !item._validUntilDateTime
+      const payload = bothEmpty
+        ? { _validFromDateTime: new Date().toISOString() }
+        : { _validUntilDateTime: null }
+      await api.patch(itemPath, payload)
       await refresh()
-      setToastSuccess('Activated successfully')
+      setToastSuccess(bothEmpty ? 'Activated successfully' : 'Reactivated successfully')
     } catch (err) {
       setToastError(err?.message ?? 'Activate failed')
     } finally {
@@ -681,7 +685,10 @@ export default function ItemPage() {
   const schemaProps = navItem.itemSchemaProps ?? {}
   const hasEdit = navItem.itemMethods?.some((m) => ['patch', 'put', 'delete'].includes(m))
   const hasPatch = navItem.itemMethods?.includes('patch')
-  const canActivate = hasPatch && '_validFromDateTime' in schemaProps
+  const bothEmpty = !item._validFromDateTime && !item._validUntilDateTime
+  const bothPopulated = !!item._validFromDateTime && !!item._validUntilDateTime
+  const isReactivate = bothPopulated
+  const canActivate = hasPatch && '_validFromDateTime' in schemaProps && (bothEmpty || bothPopulated)
   const canDeactivate = hasPatch && '_validUntilDateTime' in schemaProps && !!item._validFromDateTime && new Date(item._validFromDateTime) <= new Date()
   const decodedId = decodeURIComponent(itemId ?? '')
   const hasPendingEdits = Object.keys(pendingEdits).length > 0
@@ -754,12 +761,12 @@ export default function ItemPage() {
                             onClick={() => setPendingActivate(true)}
                             disabled={activating}
                             className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 hover:text-emerald-100 disabled:opacity-50 transition-colors"
-                            title="Set valid from now"
+                            title={isReactivate ? 'Clear valid-until date' : 'Set valid from now'}
                           >
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            {activating ? 'Activating…' : 'Activate'}
+                            {activating ? (isReactivate ? 'Reactivating…' : 'Activating…') : (isReactivate ? 'Reactivate' : 'Activate')}
                           </button>
                         )}
                         {canActivate && canDeactivate && <span className="w-px bg-slate-700" />}
@@ -972,9 +979,13 @@ export default function ItemPage() {
       />
       <ConfirmDialog
         open={pendingActivate}
-        title="Activate this record?"
-        message="This will set the valid-from date to now. You can undo this later by editing the field."
-        confirmLabel="Yes, activate"
+        title={isReactivate ? 'Reactivate this record?' : 'Activate this record?'}
+        message={
+          isReactivate
+            ? 'This will clear the valid-until date, making the record active again. You can undo this later by editing the field.'
+            : 'This will set the valid-from date to now. You can undo this later by editing the field.'
+        }
+        confirmLabel={isReactivate ? 'Yes, reactivate' : 'Yes, activate'}
         confirmVariant="success"
         onConfirm={() => { setPendingActivate(false); handleActivate() }}
         onCancel={() => setPendingActivate(false)}
