@@ -2395,7 +2395,7 @@ export default function ResourcePage() {
           error={error}
           onRefresh={refresh}
           onRowClick={navItem?.itemPathTemplate ? handleRowClick : undefined}
-          hasValidityDates={navItem?.hasValidityDates}
+          hasValidityDates={navItem?.hasValidityDates && isFieldChecked('_validFromDateTime', fieldSelectorState) && isFieldChecked('_validUntilDateTime', fieldSelectorState)}
           onRowDelete={canDeleteItem ? handleDeleteRow : undefined}
           onRowActivate={canActivate ? handleActivateRow : undefined}
           onRowDeactivate={canDeactivate ? handleDeactivateRow : undefined}

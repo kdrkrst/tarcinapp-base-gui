@@ -500,8 +500,9 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
     return true
   })
 
-  const status = computeRowStatus(item)
-  const borderColor = STATUS_SHADOW_COLOR[status]
+  const hasValidityDates = '_validFromDateTime' in item || '_validUntilDateTime' in item
+  const status = hasValidityDates ? computeRowStatus(item) : null
+  const borderColor = status ? STATUS_SHADOW_COLOR[status] : null
   const relationMeta = item._relationMetadata ?? null
   const relationStatus = relationMeta ? computeRowStatus(relationMeta) : null
   const RELATION_CHIP_COLORS = {
@@ -605,7 +606,7 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
     <div className="rounded border border-slate-800 hover:border-slate-600 transition-colors">
       <div
         className="group flex items-center gap-2 pl-3 pr-2 py-1.5 hover:bg-slate-800/50 transition-colors min-w-0"
-        style={{ boxShadow: `inset 3px 0 0 ${borderColor}` }}
+        style={borderColor ? { boxShadow: `inset 3px 0 0 ${borderColor}` } : undefined}
       >
         {/* short ID + copy */}
         {id && (
