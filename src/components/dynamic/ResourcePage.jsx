@@ -6,50 +6,11 @@ import { useApiClient } from '../../services/apiClient'
 import { useResourceList } from '../../hooks/useResourceList'
 import DataGrid from '../ui/DataGrid'
 import Toast from '../ui/Toast'
+import VisualFilterBuilder from '../ui/VisualFilterBuilder'
+import { buildFilterExprQuery, buildBlockFromKeys, appendBlock, makeOr, makeSet } from '../../utils/filterExpr'
 
 function buildItemPath(template, id) {
   return template.replace(/\{[^}]+\}/, encodeURIComponent(id))
-}
-
-function buildSetQuery(queryString, statusSelections, visibilitySelections) {
-  const groups = []
-  if (statusSelections.length) groups.push(statusSelections)
-  if (visibilitySelections.length) groups.push(visibilitySelections)
-
-  if (!groups.length) return queryString
-
-  if (groups.length === 1) {
-    const [group] = groups
-    if (group.length === 1) {
-      queryString.set(`set[${group[0]}]`, 'true')
-      return queryString
-    }
-
-    group.forEach((entry, index) => {
-      queryString.set(`set[or][${index}][${entry}]`, 'true')
-    })
-    return queryString
-  }
-
-  groups.forEach((group, groupIndex) => {
-    group.forEach((entry, entryIndex) => {
-      queryString.set(`set[and][${groupIndex}][or][${entryIndex}][${entry}]`, 'true')
-    })
-  })
-
-  return queryString
-}
-
-function buildSetsQuery(queryString, setSelections) {
-  for (const [key, val] of Object.entries(setSelections)) {
-    if (val === true) {
-      queryString.set(`set[${key}]`, 'true')
-    } else if (val && typeof val === 'object') {
-      if (val.userIds?.trim()) queryString.set(`set[${key}][userIds]`, val.userIds.trim())
-      if (val.groupIds?.trim()) queryString.set(`set[${key}][groupIds]`, val.groupIds.trim())
-    }
-  }
-  return queryString
 }
 
 function formatQueryPreview(queryString) {
@@ -441,7 +402,14 @@ export default function ResourcePage() {
   const navigate = useNavigate()
   const { oasSpec, endpoint, token } = useApp()
   const { get, getWithMeta, post, patch, del } = useApiClient()
-  const [setSelections, setSetSelections] = useState({})
+  // filterBuilderExpr: FilterExpr AST (null = no set filter)
+  const [filterBuilderExpr, setFilterBuilderExpr] = useState(null)
+  // staged selections in the Sets dropdown (array of keys)
+  const [stagedSetKeys, setStagedSetKeys] = useState([])
+  // userIds / groupIds for staged object-type sets: { [key]: { userIds: string, groupIds: string } }
+  const [stagedSetMeta, setStagedSetMeta] = useState({})
+  // AND/OR logic used internally within the staged block
+  const [setsInternalOp, setSetsInternalOp] = useState('or')
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(25)
   const [queryInfoOpen, setQueryInfoOpen] = useState(false)
@@ -626,13 +594,13 @@ export default function ResourcePage() {
     [oasSpec, navItem?.collectionPath]
   )
 
-  const hasAnySetSelection = Object.keys(setSelections).length > 0
+  const hasAnySetSelection = filterBuilderExpr !== null
 
   const querySummary = useMemo(() => {
     const qs = new URLSearchParams()
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
-    buildSetsQuery(qs, setSelections)
+    buildFilterExprQuery(qs, filterBuilderExpr)
     if (debouncedSearch) {
       if (navItem?.hasSimplifiedSearch) qs.set('s', debouncedSearch)
       else qs.set('filter[where][_name][regexp]', `.*${debouncedSearch}.*`)
@@ -642,7 +610,7 @@ export default function ResourcePage() {
     buildFilterFieldsParams(qs, fieldSelectorState)
     buildFilterOrderParams(qs, sortOrder)
     return formatQueryPreview(qs)
-  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, setSelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
+  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, filterBuilderExpr, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
 
   useEffect(() => {
     setPage(0)
@@ -652,7 +620,9 @@ export default function ResourcePage() {
     setSelectedQ(null)
     setSelectedFieldset(null)
     setSortOrder([])
-    setSetSelections({})
+    setFilterBuilderExpr(null)
+    setStagedSetKeys([])
+    setStagedSetMeta({})
   }, [navItem?.collectionPath])
 
   useEffect(() => {
@@ -753,7 +723,7 @@ export default function ResourcePage() {
     const qs = new URLSearchParams()
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
-    buildSetsQuery(qs, setSelections)
+    buildFilterExprQuery(qs, filterBuilderExpr)
     if (debouncedSearch) {
       if (navItem?.hasSimplifiedSearch) qs.set('s', debouncedSearch)
       else qs.set('filter[where][_name][regexp]', `.*${debouncedSearch}.*`)
@@ -770,7 +740,7 @@ export default function ResourcePage() {
     setResponseStatus(status)
     setRequestHeaders(reqHeaders ?? null)
     return data ?? []
-  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, setSelections, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
+  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, filterBuilderExpr, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
 
   const { data, loading, error, refresh } = useResourceList(fetcher)
 
@@ -844,7 +814,15 @@ export default function ResourcePage() {
     const qs = new URLSearchParams()
     qs.set(pKeys.limitKey, String(pageSize))
     qs.set(pKeys.skipKey, String(page * pageSize))
-    buildSetQuery(qs, filters.statusFilter ? [filters.statusFilter] : [], filters.visibilityFilter ? [filters.visibilityFilter] : [])
+    // Build a simple OR-grouped set expr from the per-traversal status/visibility single-values
+    const traversalSetKeys = [
+      ...(filters.statusFilter ? [filters.statusFilter] : []),
+      ...(filters.visibilityFilter ? [filters.visibilityFilter] : []),
+    ]
+    if (traversalSetKeys.length > 0) {
+      const nodes = traversalSetKeys.map((k) => makeSet(k))
+      buildFilterExprQuery(qs, nodes.length === 1 ? nodes[0] : makeOr(nodes))
+    }
     if (filters.sortField) qs.set('filter[order]', `${filters.sortField} ${filters.sortDir ?? 'ASC'}`)
     const result = await get(`${resolvedPath}?${qs.toString()}`)
     return Array.isArray(result) ? result : []
@@ -1208,7 +1186,7 @@ export default function ResourcePage() {
             const activeFilterCount = [
               selectedQ !== null,
               selectedFieldset !== null,
-              Object.keys(setSelections).length > 0,
+              filterBuilderExpr !== null,
               fieldSelectorState.mode !== 'all',
               sortOrder.length > 0,
             ].filter(Boolean).length
@@ -1283,9 +1261,9 @@ export default function ResourcePage() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-200">Filters</p>
             <div className="flex items-center gap-3">
-              {[selectedQ !== null, selectedFieldset !== null, Object.keys(setSelections).length > 0, fieldSelectorState.mode !== 'all', sortOrder.length > 0].some(Boolean) && (
+              {[selectedQ !== null, selectedFieldset !== null, filterBuilderExpr !== null, fieldSelectorState.mode !== 'all', sortOrder.length > 0].some(Boolean) && (
                 <button
-                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setSetSelections({}); setFieldSelectorState({ mode: 'all', selected: new Set() }); setSortOrder([]); setPage(0) }}
+                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setFilterBuilderExpr(null); setStagedSetKeys([]); setStagedSetMeta({}); setFieldSelectorState({ mode: 'all', selected: new Set() }); setSortOrder([]); setPage(0) }}
                   className="text-xs text-slate-400 hover:text-blue-400 transition-colors"
                 >
                   Clear all
@@ -1303,67 +1281,150 @@ export default function ResourcePage() {
             </div>
           </div>
 
-          {/* Quick-filter row */}
+          {/* Quick-filter row: Sets staging, Query, Fieldset, Status, Visibility */}
           <div className="flex flex-wrap gap-6">
+
+            {/* ── Sets staging dropdown ── */}
             {navItem.hasSet && navItem.setSchemaProps && (
               <div className="space-y-1.5" ref={setsDropdownRef}>
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Sets</p>
                 <div className="relative">
-                  <div className="flex items-center gap-1">
+                  {/* Trigger row: dropdown button + inject buttons */}
+                  <div className="flex items-center gap-1.5">
+
+                    {/* Dropdown trigger */}
                     <button
                       onClick={() => setSetsDropdownOpen((v) => !v)}
-                      className={`flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border ${setsDropdownOpen || Object.keys(setSelections).length > 0 ? 'border-blue-600' : 'border-slate-700'} text-slate-300 hover:bg-slate-700 hover:text-white transition-colors min-w-[140px]`}
+                      className={`flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border ${setsDropdownOpen || stagedSetKeys.length > 0 ? 'border-blue-600' : 'border-slate-700'} text-slate-300 hover:bg-slate-700 hover:text-white transition-colors min-w-[140px]`}
                     >
                       <span className="truncate mr-1.5">
-                        {Object.keys(setSelections).length > 0
-                          ? <span className="text-blue-300">{Object.keys(setSelections).join(', ')}</span>
-                          : <span className="text-slate-500">— none —</span>}
+                        {stagedSetKeys.length > 0
+                          ? <span className="text-blue-300">{stagedSetKeys.join(', ')}</span>
+                          : <span className="text-slate-500">— select sets —</span>}
                       </span>
                       <svg className="w-3 h-3 flex-shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                     </button>
-                    {Object.keys(setSelections).length > 0 && (
+
+                    {/* Inject AND button */}
+                    <button
+                      disabled={stagedSetKeys.length === 0}
+                      onClick={() => {
+                        const mergedProps = Object.fromEntries(
+                          stagedSetKeys.map((k) => [k, { ...(navItem.setSchemaProps[k] ?? {}), ...(stagedSetMeta[k] ?? {}) }])
+                        )
+                        const block = buildBlockFromKeys(stagedSetKeys, mergedProps, setsInternalOp)
+                        if (!block) return
+                        setFilterBuilderExpr((prev) => appendBlock(prev, block, 'and'))
+                        setStagedSetKeys([])
+                        setStagedSetMeta({})
+                        setPage(0)
+                      }}
+                      title="Append staged sets to the filter builder, joined to the existing expression with AND"
+                      className="px-2 py-1.5 text-[10px] font-bold font-mono uppercase rounded-lg border transition-colors bg-blue-900/30 border-blue-700/60 text-blue-400 hover:bg-blue-700 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      + and
+                    </button>
+
+                    {/* Inject OR button */}
+                    <button
+                      disabled={stagedSetKeys.length === 0}
+                      onClick={() => {
+                        const mergedProps = Object.fromEntries(
+                          stagedSetKeys.map((k) => [k, { ...(navItem.setSchemaProps[k] ?? {}), ...(stagedSetMeta[k] ?? {}) }])
+                        )
+                        const block = buildBlockFromKeys(stagedSetKeys, mergedProps, setsInternalOp)
+                        if (!block) return
+                        setFilterBuilderExpr((prev) => appendBlock(prev, block, 'or'))
+                        setStagedSetKeys([])
+                        setStagedSetMeta({})
+                        setPage(0)
+                      }}
+                      title="Append staged sets to the filter builder, joined to the existing expression with OR"
+                      className="px-2 py-1.5 text-[10px] font-bold font-mono uppercase rounded-lg border transition-colors bg-amber-900/30 border-amber-700/60 text-amber-400 hover:bg-amber-700 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      + or
+                    </button>
+
+                    {/* Clear staged */}
+                    {stagedSetKeys.length > 0 && (
                       <button
-                        onClick={() => { setSetSelections({}); setPage(0) }}
+                        onClick={() => { setStagedSetKeys([]); setStagedSetMeta({}) }}
                         className="flex items-center justify-center w-5 h-5 rounded text-slate-500 hover:text-white hover:bg-slate-700 transition-colors"
-                        title="Clear set filters"
-                        aria-label="Clear set filters"
+                        title="Clear staged selection"
+                        aria-label="Clear staged selection"
                       >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                       </button>
                     )}
                   </div>
+
+                  {/* Dropdown panel */}
                   {setsDropdownOpen && (
-                    <div className="absolute left-0 top-full mt-1 z-20 min-w-[260px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-3 space-y-2">
+                    <div className="absolute left-0 top-full mt-1 z-20 min-w-[280px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-3 space-y-3">
+
+                      {/* AND / OR internal toggle — styled like Status/Visibility button groups */}
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Join selected with</p>
+                        <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+                          {['or', 'and'].map((op) => (
+                            <button
+                              key={op}
+                              type="button"
+                              onClick={() => setSetsInternalOp(op)}
+                              className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
+                                setsInternalOp === op
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                              }`}
+                            >
+                              {op.toUpperCase()}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <hr className="border-slate-700/60" />
+
+                      {/* Hint */}
+                      <p className="text-[10px] text-slate-600 italic">Select sets below, then click <span className="font-bold not-italic text-slate-500">+ and</span> or <span className="font-bold not-italic text-slate-500">+ or</span> to append to the filter.</p>
+
+                      {/* Set checkboxes with optional userIds / groupIds inputs */}
                       {Object.entries(navItem.setSchemaProps).map(([key, meta]) => {
-                        const isChecked = key in setSelections
+                        const isStaged = stagedSetKeys.includes(key)
                         return (
                           <div key={key}>
                             <label className="flex items-center gap-2 cursor-pointer group/setopt">
                               <input
                                 type="checkbox"
-                                checked={isChecked}
+                                checked={isStaged}
                                 onChange={() => {
-                                  setPage(0)
-                                  if (isChecked) {
-                                    const next = { ...setSelections }
-                                    delete next[key]
-                                    setSetSelections(next)
-                                  } else {
-                                    setSetSelections({ ...setSelections, [key]: meta.isObject ? { userIds: '', groupIds: '' } : true })
+                                  setStagedSetKeys((prev) =>
+                                    prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+                                  )
+                                  if (isStaged) {
+                                    // unchecking — remove its meta entry
+                                    setStagedSetMeta((prev) => {
+                                      const next = { ...prev }
+                                      delete next[key]
+                                      return next
+                                    })
+                                  } else if (meta.isObject) {
+                                    // checking an object-type set — seed empty meta entry
+                                    setStagedSetMeta((prev) => ({ ...prev, [key]: { userIds: '', groupIds: '' } }))
                                   }
                                 }}
                                 className="w-3.5 h-3.5 accent-blue-500 cursor-pointer flex-shrink-0"
                               />
-                              <span className={`text-xs font-mono ${isChecked ? 'text-blue-300' : 'text-slate-300 group-hover/setopt:text-white'}`}>{key}</span>
+                              <span className={`text-xs font-mono ${isStaged ? 'text-blue-300' : 'text-slate-300 group-hover/setopt:text-white'}`}>{key}</span>
                             </label>
-                            {isChecked && meta.isObject && (
+                            {isStaged && meta.isObject && (
                               <div className="ml-5 mt-2 space-y-2">
                                 <div>
                                   <p className="text-[10px] text-slate-500 mb-0.5">userIds</p>
                                   <input
                                     type="text"
-                                    value={setSelections[key]?.userIds ?? ''}
-                                    onChange={(e) => setSetSelections((prev) => ({ ...prev, [key]: { ...prev[key], userIds: e.target.value } }))}
+                                    value={stagedSetMeta[key]?.userIds ?? ''}
+                                    onChange={(e) => setStagedSetMeta((prev) => ({ ...prev, [key]: { ...prev[key], userIds: e.target.value } }))}
                                     placeholder="user-id-1"
                                     className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
                                   />
@@ -1372,8 +1433,8 @@ export default function ResourcePage() {
                                   <p className="text-[10px] text-slate-500 mb-0.5">groupIds</p>
                                   <input
                                     type="text"
-                                    value={setSelections[key]?.groupIds ?? ''}
-                                    onChange={(e) => setSetSelections((prev) => ({ ...prev, [key]: { ...prev[key], groupIds: e.target.value } }))}
+                                    value={stagedSetMeta[key]?.groupIds ?? ''}
+                                    onChange={(e) => setStagedSetMeta((prev) => ({ ...prev, [key]: { ...prev[key], groupIds: e.target.value } }))}
                                     placeholder="group-id-1"
                                     className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
                                   />
@@ -1388,6 +1449,8 @@ export default function ResourcePage() {
                 </div>
               </div>
             )}
+
+            {/* ── Query dropdown ── */}
             {qEnumValues && (
               <div className="space-y-1.5" ref={qDropdownRef}>
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Query</p>
@@ -1431,6 +1494,7 @@ export default function ResourcePage() {
               </div>
             )}
 
+            {/* ── Fieldset dropdown ── */}
             {fieldsetEnumValues && (
               <div className="space-y-1.5" ref={fieldsetDropdownRef}>
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Fieldset</p>
@@ -1474,68 +1538,147 @@ export default function ResourcePage() {
               </div>
             )}
 
+            {/* ── Status multi-select buttons (OR logic) ── */}
             {navItem.hasSet && navItem.hasValidityDates && navItem.setSchemaProps && ['actives', 'pendings', 'expireds'].some((k) => k in navItem.setSchemaProps) && (
               <div className="space-y-1.5">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Status</p>
-                <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
-                  {['actives', 'pendings', 'expireds'].filter((k) => k in navItem.setSchemaProps).map((key) => {
-                    const selected = setSelections[key] === true
-                    const label = key.charAt(0).toUpperCase() + key.slice(1)
-                    return (
-                      <button
-                        key={key}
-                        onClick={() => {
-                          setPage(0)
-                          setSetSelections((prev) => {
-                            const next = { ...prev }
-                            if (next[key]) delete next[key]
-                            else next[key] = true
-                            return next
-                          })
-                        }}
-                        className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
-                          selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    )
-                  })}
-                </div>
+                {(() => {
+                  const statusKeys = ['actives', 'pendings', 'expireds'].filter((k) => k in navItem.setSchemaProps)
+                  // Derive currently-active status keys from the filter expression
+                  const activeStatusKeys = (() => {
+                    if (!filterBuilderExpr) return []
+                    const collect = (node) => {
+                      if (!node) return []
+                      if (node.type === 'set' && statusKeys.includes(node.key)) return [node.key]
+                      if (node.type === 'group') return collect(node.child)
+                      if (node.type === 'or' || node.type === 'and') return node.children.flatMap(collect)
+                      return []
+                    }
+                    return collect(filterBuilderExpr)
+                  })()
+                  return (
+                    <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+                      {statusKeys.map((key) => {
+                        const selected = activeStatusKeys.includes(key)
+                        const label = key.charAt(0).toUpperCase() + key.slice(1)
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => {
+                              setPage(0)
+                              if (selected) {
+                                // Remove this key from the expression
+                                setFilterBuilderExpr((prev) => {
+                                  if (!prev) return null
+                                  const removeKey = (node) => {
+                                    if (!node) return null
+                                    if (node.type === 'set') return node.key === key ? null : node
+                                    if (node.type === 'group') {
+                                      const inner = removeKey(node.child)
+                                      return inner ? { ...node, child: inner } : null
+                                    }
+                                    if (node.type === 'or' || node.type === 'and') {
+                                      const children = node.children.map(removeKey).filter(Boolean)
+                                      if (children.length === 0) return null
+                                      if (children.length === 1) return children[0]
+                                      return { ...node, children }
+                                    }
+                                    return node
+                                  }
+                                  return removeKey(prev)
+                                })
+                              } else {
+                                // Add key via OR
+                                setFilterBuilderExpr((prev) => appendBlock(prev, makeSet(key), 'or'))
+                              }
+                            }}
+                            className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
+                              selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
               </div>
             )}
 
+            {/* ── Visibility multi-select buttons (OR logic) ── */}
             {navItem.hasSet && navItem.setSchemaProps && ['publics', 'protecteds', 'privates'].some((k) => k in navItem.setSchemaProps) && (
               <div className="space-y-1.5">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Visibility</p>
-                <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
-                  {[{ key: 'publics', label: 'Public' }, { key: 'protecteds', label: 'Protected' }, { key: 'privates', label: 'Private' }].filter(({ key }) => key in navItem.setSchemaProps).map(({ key, label }) => {
-                    const selected = setSelections[key] === true
-                    return (
-                      <button
-                        key={key}
-                        onClick={() => {
-                          setPage(0)
-                          setSetSelections((prev) => {
-                            const next = { ...prev }
-                            if (next[key]) delete next[key]
-                            else next[key] = true
-                            return next
-                          })
-                        }}
-                        className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
-                          selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    )
-                  })}
-                </div>
+                {(() => {
+                  const visKeys = ['publics', 'protecteds', 'privates'].filter((k) => k in navItem.setSchemaProps)
+                  const activeVisKeys = (() => {
+                    if (!filterBuilderExpr) return []
+                    const collect = (node) => {
+                      if (!node) return []
+                      if (node.type === 'set' && visKeys.includes(node.key)) return [node.key]
+                      if (node.type === 'group') return collect(node.child)
+                      if (node.type === 'or' || node.type === 'and') return node.children.flatMap(collect)
+                      return []
+                    }
+                    return collect(filterBuilderExpr)
+                  })()
+                  return (
+                    <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+                      {[{ key: 'publics', label: 'Public' }, { key: 'protecteds', label: 'Protected' }, { key: 'privates', label: 'Private' }].filter(({ key }) => key in navItem.setSchemaProps).map(({ key, label }) => {
+                        const selected = activeVisKeys.includes(key)
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => {
+                              setPage(0)
+                              if (selected) {
+                                setFilterBuilderExpr((prev) => {
+                                  if (!prev) return null
+                                  const removeKey = (node) => {
+                                    if (!node) return null
+                                    if (node.type === 'set') return node.key === key ? null : node
+                                    if (node.type === 'group') {
+                                      const inner = removeKey(node.child)
+                                      return inner ? { ...node, child: inner } : null
+                                    }
+                                    if (node.type === 'or' || node.type === 'and') {
+                                      const children = node.children.map(removeKey).filter(Boolean)
+                                      if (children.length === 0) return null
+                                      if (children.length === 1) return children[0]
+                                      return { ...node, children }
+                                    }
+                                    return node
+                                  }
+                                  return removeKey(prev)
+                                })
+                              } else {
+                                setFilterBuilderExpr((prev) => appendBlock(prev, makeSet(key), 'or'))
+                              }
+                            }}
+                            className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
+                              selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
               </div>
             )}
 
           </div>
+
+          {/* ── Visual Filter Builder ── */}
+          {navItem.hasSet && filterBuilderExpr && (
+            <VisualFilterBuilder
+              expr={filterBuilderExpr}
+              onChange={(next) => { setFilterBuilderExpr(next); setPage(0) }}
+            />
+          )}
 
           {/* Column selector */}
           {showFieldSelector && (
@@ -2353,28 +2496,28 @@ export default function ResourcePage() {
                 </span>
               </button>
 
-              {/* Applied filters */}
-              {['actives', 'pendings', 'expireds'].some((k) => setSelections[k]) && (
-                <div className="space-y-1.5">
-                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Status filter</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {['actives', 'pendings', 'expireds'].filter((k) => setSelections[k]).map((k) => (
-                      <span key={k} className="px-2 py-0.5 text-xs rounded-md bg-blue-600/20 text-blue-300 border border-blue-700">{k.charAt(0).toUpperCase() + k.slice(1)}</span>
-                    ))}
+              {/* Applied set filters (derived from filterBuilderExpr) */}
+              {filterBuilderExpr && (() => {
+                const collectKeys = (node) => {
+                  if (!node) return []
+                  if (node.type === 'set') return [node.key]
+                  if (node.type === 'group') return collectKeys(node.child)
+                  if (node.type === 'or' || node.type === 'and') return node.children.flatMap(collectKeys)
+                  return []
+                }
+                const keys = collectKeys(filterBuilderExpr)
+                if (!keys.length) return null
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Set filter</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {keys.map((k) => (
+                        <span key={k} className="px-2 py-0.5 text-xs rounded-md bg-violet-600/20 text-violet-300 border border-violet-700 font-mono">{k}</span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-
-              {['publics', 'protecteds', 'privates'].some((k) => setSelections[k]) && (
-                <div className="space-y-1.5">
-                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Visibility filter</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[{ key: 'publics', label: 'Public' }, { key: 'protecteds', label: 'Protected' }, { key: 'privates', label: 'Private' }].filter(({ key }) => setSelections[key]).map(({ key, label }) => (
-                      <span key={key} className="px-2 py-0.5 text-xs rounded-md bg-violet-600/20 text-violet-300 border border-violet-700">{label}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
+                )
+              })()}
 
             </div>
 
