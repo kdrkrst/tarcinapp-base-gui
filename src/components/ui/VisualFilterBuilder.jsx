@@ -16,22 +16,6 @@
 import { useMemo } from 'react'
 import { exprToTokens, tokensToExpr } from '../../utils/filterExpr'
 
-// ─── Token styling helpers ────────────────────────────────────────────────────
-
-const SET_COLORS = [
-  'bg-violet-900/50 border-violet-600 text-violet-300',
-  'bg-sky-900/50 border-sky-600 text-sky-300',
-  'bg-emerald-900/50 border-emerald-600 text-emerald-300',
-  'bg-amber-900/50 border-amber-600 text-amber-300',
-  'bg-rose-900/50 border-rose-600 text-rose-300',
-  'bg-teal-900/50 border-teal-600 text-teal-300',
-]
-
-function colorForKey(key, allKeys) {
-  const idx = allKeys.indexOf(key)
-  return SET_COLORS[(idx < 0 ? 0 : idx) % SET_COLORS.length]
-}
-
 // ─── Mutation helpers on a flat token list ───────────────────────────────────
 
 /**
@@ -118,7 +102,6 @@ function wrapInParens(tokens, fromIdx, toIdx) {
 
 export default function VisualFilterBuilder({ expr, onChange }) {
   const tokens = useMemo(() => exprToTokens(expr), [expr])
-  const setKeys = useMemo(() => tokens.filter((t) => t.type === 'set').map((t) => t.key), [tokens])
 
   if (!expr || tokens.length === 0) return null
 
@@ -138,11 +121,10 @@ export default function VisualFilterBuilder({ expr, onChange }) {
       <span className="text-slate-700 text-xs shrink-0">›</span>
       {tokens.map((token, i) => {
         if (token.type === 'set') {
-          const color = colorForKey(token.key, setKeys)
           return (
             <span
               key={token.id}
-              className={`inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded border text-xs font-mono ${color}`}
+              className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded border text-xs font-mono bg-slate-800 border-slate-600 text-slate-300"
             >
               set[{token.key}]
               <button

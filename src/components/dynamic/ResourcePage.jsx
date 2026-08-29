@@ -1298,95 +1298,118 @@ export default function ResourcePage() {
               <div className="space-y-1.5" ref={setsDropdownRef}>
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Sets</p>
                 <div className="relative">
-                  {/* Trigger row: dropdown button + inject buttons */}
-                  <div className="flex items-center gap-1.5">
+                  {/* Trigger row: fused control group */}
+                  <div className="flex items-center">
+                    <div className={`inline-flex rounded-lg border divide-x overflow-hidden ${setsDropdownOpen || stagedSetKeys.length > 0 ? 'border-blue-600 divide-blue-600' : 'border-slate-700 divide-slate-700'}`}>
 
-                    {/* Dropdown trigger */}
-                    <button
-                      onClick={() => setSetsDropdownOpen((v) => !v)}
-                      className={`flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border ${setsDropdownOpen || stagedSetKeys.length > 0 ? 'border-blue-600' : 'border-slate-700'} text-slate-300 hover:bg-slate-700 hover:text-white transition-colors min-w-[140px]`}
-                    >
-                      <span className="truncate mr-1.5">
-                        {stagedSetKeys.length > 0
-                          ? <span className="text-blue-300">{stagedSetKeys.join(', ')}</span>
-                          : <span className="text-slate-500">— select sets —</span>}
-                      </span>
-                      <svg className="w-3 h-3 flex-shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                    </button>
-
-                    {/* Inject AND button */}
-                    <button
-                      disabled={stagedSetKeys.length === 0}
-                      onClick={() => {
-                        const mergedProps = Object.fromEntries(
-                          stagedSetKeys.map((k) => [k, { ...(navItem.setSchemaProps[k] ?? {}), ...(stagedSetMeta[k] ?? {}) }])
-                        )
-                        const block = buildBlockFromKeys(stagedSetKeys, mergedProps, setsInternalOp)
-                        if (!block) return
-                        setFilterBuilderExpr((prev) => appendBlock(prev, block, 'and'))
-                        setStagedSetKeys([])
-                        setStagedSetMeta({})
-                        setPage(0)
-                      }}
-                      title="Append staged sets to the filter builder, joined to the existing expression with AND"
-                      className="px-2 py-1.5 text-[10px] font-bold font-mono uppercase rounded-lg border transition-colors bg-blue-900/30 border-blue-700/60 text-blue-400 hover:bg-blue-700 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      + and
-                    </button>
-
-                    {/* Inject OR button */}
-                    <button
-                      disabled={stagedSetKeys.length === 0}
-                      onClick={() => {
-                        const mergedProps = Object.fromEntries(
-                          stagedSetKeys.map((k) => [k, { ...(navItem.setSchemaProps[k] ?? {}), ...(stagedSetMeta[k] ?? {}) }])
-                        )
-                        const block = buildBlockFromKeys(stagedSetKeys, mergedProps, setsInternalOp)
-                        if (!block) return
-                        setFilterBuilderExpr((prev) => appendBlock(prev, block, 'or'))
-                        setStagedSetKeys([])
-                        setStagedSetMeta({})
-                        setPage(0)
-                      }}
-                      title="Append staged sets to the filter builder, joined to the existing expression with OR"
-                      className="px-2 py-1.5 text-[10px] font-bold font-mono uppercase rounded-lg border transition-colors bg-amber-900/30 border-amber-700/60 text-amber-400 hover:bg-amber-700 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      + or
-                    </button>
-
-                    {/* Clear staged */}
-                    {stagedSetKeys.length > 0 && (
+                      {/* Dropdown trigger */}
                       <button
-                        onClick={() => { setStagedSetKeys([]); setStagedSetMeta({}) }}
-                        className="flex items-center justify-center w-5 h-5 rounded text-slate-500 hover:text-white hover:bg-slate-700 transition-colors"
-                        title="Clear staged selection"
-                        aria-label="Clear staged selection"
+                        onClick={() => setSetsDropdownOpen((v) => !v)}
+                        className={`flex items-center justify-between px-2.5 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 transition-colors min-w-[140px] ${setsDropdownOpen || stagedSetKeys.length > 0 ? 'text-blue-300' : 'text-slate-300 hover:text-white'}`}
                       >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                        <span className="truncate mr-1.5">
+                          {stagedSetKeys.length > 0
+                            ? stagedSetKeys.join(', ')
+                            : <span className="text-slate-500">— select sets —</span>}
+                        </span>
+                        <svg className="w-3 h-3 flex-shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                       </button>
-                    )}
+
+                      {/* Inject button(s): single "Add" when no existing filter, +and/+or when one exists */}
+                      {filterBuilderExpr === null ? (
+                        <button
+                          disabled={stagedSetKeys.length === 0}
+                          onClick={() => {
+                            const mergedProps = Object.fromEntries(
+                              stagedSetKeys.map((k) => [k, { ...(navItem.setSchemaProps[k] ?? {}), ...(stagedSetMeta[k] ?? {}) }])
+                            )
+                            const block = buildBlockFromKeys(stagedSetKeys, mergedProps, setsInternalOp)
+                            if (!block) return
+                            setFilterBuilderExpr(block)
+                            setStagedSetKeys([])
+                            setStagedSetMeta({})
+                            setPage(0)
+                          }}
+                          title="Add staged sets to the filter"
+                          className="px-2.5 py-1.5 text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          Add
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            disabled={stagedSetKeys.length === 0}
+                            onClick={() => {
+                              const mergedProps = Object.fromEntries(
+                                stagedSetKeys.map((k) => [k, { ...(navItem.setSchemaProps[k] ?? {}), ...(stagedSetMeta[k] ?? {}) }])
+                              )
+                              const block = buildBlockFromKeys(stagedSetKeys, mergedProps, setsInternalOp)
+                              if (!block) return
+                              setFilterBuilderExpr((prev) => appendBlock(prev, block, 'and'))
+                              setStagedSetKeys([])
+                              setStagedSetMeta({})
+                              setPage(0)
+                            }}
+                            title="Append staged sets to the filter builder, joined to the existing expression with AND"
+                            className="px-2.5 py-1.5 text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            +and
+                          </button>
+                          <button
+                            disabled={stagedSetKeys.length === 0}
+                            onClick={() => {
+                              const mergedProps = Object.fromEntries(
+                                stagedSetKeys.map((k) => [k, { ...(navItem.setSchemaProps[k] ?? {}), ...(stagedSetMeta[k] ?? {}) }])
+                              )
+                              const block = buildBlockFromKeys(stagedSetKeys, mergedProps, setsInternalOp)
+                              if (!block) return
+                              setFilterBuilderExpr((prev) => appendBlock(prev, block, 'or'))
+                              setStagedSetKeys([])
+                              setStagedSetMeta({})
+                              setPage(0)
+                            }}
+                            title="Append staged sets to the filter builder, joined to the existing expression with OR"
+                            className="px-2.5 py-1.5 text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            +or
+                          </button>
+                        </>
+                      )}
+
+                      {/* Clear staged */}
+                      {stagedSetKeys.length > 0 && (
+                        <button
+                          onClick={() => { setStagedSetKeys([]); setStagedSetMeta({}) }}
+                          className="flex items-center justify-center px-2 bg-slate-800 text-slate-500 hover:text-white hover:bg-slate-700 transition-colors"
+                          title="Clear staged selection"
+                          aria-label="Clear staged selection"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Dropdown panel */}
                   {setsDropdownOpen && (
                     <div className="absolute left-0 top-full mt-1 z-20 min-w-[280px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-3 space-y-3">
 
-                      {/* AND / OR internal toggle — styled like Status/Visibility button groups */}
-                      <div className="space-y-1.5">
-                        <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Join selected with</p>
-                        <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+                      {/* AND / OR internal toggle */}
+                      <div className="flex items-center gap-2">
+                        <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium shrink-0">Join with</p>
+                        <div className="inline-flex rounded border border-slate-700 overflow-hidden">
                           {['or', 'and'].map((op) => (
                             <button
                               key={op}
                               type="button"
                               onClick={() => setSetsInternalOp(op)}
-                              className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
+                              className={`px-2 py-0.5 text-[10px] font-mono font-bold uppercase border-r border-slate-700 last:border-r-0 transition-colors ${
                                 setsInternalOp === op
                                   ? 'bg-blue-600 text-white'
                                   : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
                               }`}
                             >
-                              {op.toUpperCase()}
+                              {op}
                             </button>
                           ))}
                         </div>
