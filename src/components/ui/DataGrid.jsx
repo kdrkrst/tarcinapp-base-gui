@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import ConfirmDialog from './ConfirmDialog'
 import ItemEditModal from './ItemEditModal'
 import { useApiClient } from '../../services/apiClient'
-import { isResolvableValue, parseTappUri } from '../../utils/oasParser'
+import { isResolvableValue, isTappUri, parseTappUri } from '../../utils/oasParser'
 
 // ─── Managed fields registry ───────────────────────────────────────────────
 const MANAGED_FIELDS_META = {
@@ -1136,6 +1136,76 @@ function timeAgo(dateStr) {
 
 const RELATIVE_DATE_KEYS = new Set(['_updatedDateTime', '_createdDateTime', '_lastUpdatedDateTime'])
 
+const TAPP_RECORD_TYPE_LABELS = {
+  entities: 'Entity',
+  lists: 'List',
+  'entity-reactions': 'Entity Reaction',
+  'list-reactions': 'List Reaction',
+}
+
+function inferTappRecordTypeLabel(uri) {
+  const parsed = parseTappUri(uri)
+  if (!parsed?.recordType) return null
+  return TAPP_RECORD_TYPE_LABELS[parsed.recordType.toLowerCase()] ?? null
+}
+
+function getTappRefChipMeta(value) {
+  if (typeof value === 'string') {
+    if (!isTappUri(value)) return null
+    const typeLabel = inferTappRecordTypeLabel(value)
+    return {
+      label: `${typeLabel ?? 'Record'} Ref`,
+      count: 1,
+      title: value,
+      isMixed: false,
+    }
+  }
+
+  if (!Array.isArray(value) || value.length === 0) return null
+  if (!value.every((item) => typeof item === 'string' && isTappUri(item))) return null
+
+  const typeLabels = value.map((uri) => inferTappRecordTypeLabel(uri) ?? 'Record')
+  const uniqueTypeLabels = new Set(typeLabels)
+  const isMixed = uniqueTypeLabels.size > 1
+  const baseLabel = isMixed ? 'Mix' : [...uniqueTypeLabels][0]
+
+  return {
+    label: `${baseLabel} Refs`,
+    count: value.length,
+    title: value.join('\n'),
+    isMixed,
+  }
+}
+
+function TappRefChip({ meta }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+        meta.isMixed
+          ? 'border-amber-700/60 bg-amber-900/30 text-amber-200'
+          : 'border-cyan-700/60 bg-cyan-900/30 text-cyan-200'
+      }`}
+      title={meta.title}
+    >
+      {meta.count > 1 ? (
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 7.5h11.25v13.5H8.25V7.5zm-3.75-4.5h11.25v13.5H4.5V3z" />
+        </svg>
+      ) : (
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 7.5h11.25v13.5H8.25V7.5zm-3.75-4.5h11.25v13.5H4.5V3z" />
+        </svg>
+      )}
+      <span>{meta.label}</span>
+      {meta.count > 1 && (
+        <span className="inline-flex items-center justify-center min-w-4 h-4 rounded-full bg-slate-900/70 border border-slate-700 px-1 text-[9px] font-mono text-slate-200">
+          {meta.count}
+        </span>
+      )}
+    </span>
+  )
+}
+
 function fmt(dateStr) {
   if (!dateStr) return '—'
   return new Date(dateStr).toLocaleString(undefined, {
@@ -1702,7 +1772,11 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                           </svg>
                         </button>
                       )
-                      : String(row[col.key] ?? '—')}
+                      : (() => {
+                        const tappMeta = getTappRefChipMeta(row[col.key])
+                        if (tappMeta) return <TappRefChip meta={tappMeta} />
+                        return String(row[col.key] ?? '—')
+                      })()}
                 </td>
               ))}
               <td className="p-0 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800 border-l border-slate-700/50">
