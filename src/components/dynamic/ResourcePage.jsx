@@ -102,6 +102,45 @@ function buildFilterOrderParams(qs, sortOrder) {
   }
 }
 
+const RESOURCE_FIELD_PREFS_SESSION_KEY = 'resourceFieldPrefs.v1'
+
+function loadResourceFieldPrefs(resourceKey) {
+  if (!resourceKey) return null
+  try {
+    const raw = window.sessionStorage.getItem(RESOURCE_FIELD_PREFS_SESSION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    const entry = parsed?.[resourceKey]
+    if (!entry) return null
+
+    const mode = ['all', 'exclude', 'none', 'include'].includes(entry.mode) ? entry.mode : 'all'
+    const selected = Array.isArray(entry.selected) ? new Set(entry.selected) : new Set()
+    const hidden = Array.isArray(entry.hidden) ? new Set(entry.hidden) : new Set()
+    return {
+      fieldSelectorState: { mode, selected },
+      hiddenFields: hidden,
+    }
+  } catch {
+    return null
+  }
+}
+
+function saveResourceFieldPrefs(resourceKey, fieldSelectorState, hiddenFields) {
+  if (!resourceKey) return
+  try {
+    const raw = window.sessionStorage.getItem(RESOURCE_FIELD_PREFS_SESSION_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    parsed[resourceKey] = {
+      mode: fieldSelectorState.mode,
+      selected: [...fieldSelectorState.selected],
+      hidden: [...hiddenFields],
+    }
+    window.sessionStorage.setItem(RESOURCE_FIELD_PREFS_SESSION_KEY, JSON.stringify(parsed))
+  } catch {
+    // Ignore storage errors and continue with in-memory state.
+  }
+}
+
 function parseJwt(token) {
   if (!token) return null
   const parts = token.split('.')
@@ -484,6 +523,7 @@ export default function ResourcePage() {
 
   const { navItems } = useMemo(() => parseOasSpec(oasSpec), [oasSpec])
   const navItem = useMemo(() => navItems.find((n) => n.id === tagSlug), [navItems, tagSlug])
+  const resourcePrefsKey = navItem?.collectionPath ?? null
 
   const postSchema = useMemo(
     () => getPostBodySchema(oasSpec, navItem?.collectionPath),
@@ -631,15 +671,26 @@ export default function ResourcePage() {
     setPage(0)
     setSearchInput('')
     setDebouncedSearch('')
-    setFieldSelectorState({ mode: 'all', selected: new Set() })
-    setHiddenFields(new Set())
+    const savedPrefs = loadResourceFieldPrefs(resourcePrefsKey)
+    if (savedPrefs) {
+      setFieldSelectorState(savedPrefs.fieldSelectorState)
+      setHiddenFields(savedPrefs.hiddenFields)
+    } else {
+      setFieldSelectorState({ mode: 'all', selected: new Set() })
+      setHiddenFields(new Set())
+    }
     setSelectedQ(null)
     setSelectedFieldset(null)
     setSortOrder([])
     setFilterBuilderExpr(null)
     setStagedSetKeys([])
     setStagedSetMeta({})
-  }, [navItem?.collectionPath])
+  }, [resourcePrefsKey])
+
+  useEffect(() => {
+    if (!resourcePrefsKey) return
+    saveResourceFieldPrefs(resourcePrefsKey, fieldSelectorState, hiddenFields)
+  }, [resourcePrefsKey, fieldSelectorState, hiddenFields])
 
   useEffect(() => {
     if (!qDropdownOpen) return undefined
