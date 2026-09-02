@@ -487,11 +487,12 @@ function ManagedFieldsPanel({ row, onEdit, onActivate, activateLabel, onDeactiva
 
 const TRAVERSAL_PAGE_SIZE = 10
 
-function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFetchRelation, recordTypeLabel, onResolveField, onViewRecord }) {
+function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFetchRelation, recordTypeLabel, onResolveField, onViewRecord, forceExpanded = false }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [fullRelation, setFullRelation] = useState(null)
   const [fullRelationLoading, setFullRelationLoading] = useState(false)
   const [fullRelationExpanded, setFullRelationExpanded] = useState(false)
+  const isCardExpanded = forceExpanded || isExpanded
   const id = item._id
   const shortId = id ? (id.length > 14 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id) : null
   const unmanagedFields = Object.entries(item).filter(([k]) => {
@@ -553,7 +554,7 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
   const relOtherFields = []
   const relAccessFields = []
 
-  if (isExpanded) {
+  if (isCardExpanded) {
     // Collect non-managed fields (not starting with _)
     for (const key of Object.keys(item)) {
       if (!key.startsWith('_')) {
@@ -651,16 +652,18 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
           </span>
         ))}
         {/* expand button */}
-        <button
-          onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded) }}
-          className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-slate-500 hover:text-blue-300 hover:bg-slate-700"
-          title={isExpanded ? "Collapse fields" : "Expand all fields"}
-          aria-label={isExpanded ? "Collapse fields" : "Expand all fields"}
-        >
-          <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+        {!forceExpanded && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded) }}
+            className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-slate-500 hover:text-blue-300 hover:bg-slate-700"
+            title={isCardExpanded ? "Collapse fields" : "Expand all fields"}
+            aria-label={isCardExpanded ? "Collapse fields" : "Expand all fields"}
+          >
+            <svg className={`w-3 h-3 transition-transform ${isCardExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        )}
         {/* edit button */}
         {onEdit && (
           <button
@@ -676,7 +679,7 @@ function RelatedItemCard({ item, copiedId, onCopyId, onEdit, visibleFields, onFe
         )}
       </div>
       {/* Expanded fields view */}
-      {isExpanded && (() => {
+      {isCardExpanded && (() => {
         // Build per-fieldKey resolve closure bound to this item.
         // onResolveField(fieldKey, [item]) returns Map<itemId, object[]>; unwrap for this item.
         const itemId = item._id ?? item.id
@@ -1029,6 +1032,7 @@ function ExpandedRowPanel({
                     recordTypeLabel={traversalItemTypeLabel}
                     onResolveField={resolveForItem}
                     onViewRecord={onViewRecord}
+                    forceExpanded={selectedTraversal?.synthetic && traversalData.length === 1}
                   />
                   )
                 })}
