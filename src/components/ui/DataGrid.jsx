@@ -1218,7 +1218,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSetSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList, onResolveField, onResolveTraversalField, onColumnDeselectField, onColumnHideField, selectedRowIds = null, onToggleRowSelect, onToggleAllRowsSelect, externalRefreshKey = 0, relateTraversalIds = null }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSetSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList, onResolveField, onResolveTraversalField, onColumnDeselectField, onColumnHideField, onColumnApplyFilter, selectedRowIds = null, onToggleRowSelect, onToggleAllRowsSelect, externalRefreshKey = 0, relateTraversalIds = null }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -1565,7 +1565,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                     ) : null}
                   </span>
                 </div>
-                {(onSetSortColumn || onColumnDeselectField || onColumnHideField) && (
+                {(onSetSortColumn || onColumnApplyFilter || onColumnDeselectField || onColumnHideField) && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -1581,7 +1581,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                     </svg>
                   </button>
                 )}
-                {openColumnMenuKey === col.key && (onSetSortColumn || onColumnDeselectField || onColumnHideField) && (
+                {openColumnMenuKey === col.key && (onSetSortColumn || onColumnApplyFilter || onColumnDeselectField || onColumnHideField) && (
                   <div
                     ref={columnMenuRef}
                     className="absolute right-0 top-full mt-1 z-[120] min-w-[190px] rounded-lg border border-slate-700 bg-slate-900 shadow-xl overflow-hidden"
@@ -1626,7 +1626,21 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                         )}
                       </>
                     )}
-                    {onSetSortColumn && (onColumnDeselectField || onColumnHideField) && <div className="h-px bg-slate-700/80" />}
+                    {onSetSortColumn && (onColumnApplyFilter || onColumnDeselectField || onColumnHideField) && <div className="h-px bg-slate-700/80" />}
+                    {onColumnApplyFilter && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onColumnApplyFilter(col.key)
+                          setOpenColumnMenuKey(null)
+                        }}
+                        className="block w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                      >
+                        Apply Filter
+                      </button>
+                    )}
+                    {onColumnApplyFilter && (onColumnDeselectField || onColumnHideField) && <div className="h-px bg-slate-700/80" />}
                     {onColumnDeselectField && (
                       <button
                         type="button"

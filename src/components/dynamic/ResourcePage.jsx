@@ -7,8 +7,10 @@ import { useResourceList } from '../../hooks/useResourceList'
 import DataGrid from '../ui/DataGrid'
 import Toast from '../ui/Toast'
 import VisualFilterBuilder from '../ui/VisualFilterBuilder'
+import VisualWhereFilterBuilder from '../ui/VisualWhereFilterBuilder'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import { buildFilterExprQuery, buildBlockFromKeys, appendBlock, makeOr, makeSet } from '../../utils/filterExpr'
+import { buildWhereFilterQuery, buildWhereBlockFromClauses, appendWhereBlock, WHERE_OPERATOR_OPTIONS } from '../../utils/whereFilterExpr'
 
 function buildItemPath(template, id) {
   return template.replace(/\{[^}]+\}/, encodeURIComponent(id))
@@ -108,6 +110,20 @@ function buildFilterOrderParams(qs, sortOrder) {
     })
   }
 }
+
+function makeEmptyWhereClause(field = '') {
+  return {
+    id: `wf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    field,
+    op: 'eq',
+    value: '',
+    value2: '',
+  }
+}
+
+const WHERE_OP_SECOND_VALUE = new Set(
+  WHERE_OPERATOR_OPTIONS.filter((o) => o.needsSecondValue).map((o) => o.value)
+)
 
 const RESOURCE_FIELD_PREFS_SESSION_KEY = 'resourceFieldPrefs.v1'
 
@@ -468,6 +484,11 @@ export default function ResourcePage() {
   }, [jwtClaims])
   // filterBuilderExpr: FilterExpr AST (null = no set filter)
   const [filterBuilderExpr, setFilterBuilderExpr] = useState(null)
+  // whereBuilderExpr: where-filter AST (null = no where filter)
+  const [whereBuilderExpr, setWhereBuilderExpr] = useState(null)
+  // staged where clauses before pushing into whereBuilderExpr
+  const [stagedWhereClauses, setStagedWhereClauses] = useState([])
+  const [whereInternalOp, setWhereInternalOp] = useState('and')
   // staged selections in the Sets dropdown (array of keys)
   const [stagedSetKeys, setStagedSetKeys] = useState([])
   // userIds / groupIds for staged object-type sets: { [key]: { userIds: string, groupIds: string } }
@@ -685,6 +706,7 @@ export default function ResourcePage() {
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildFilterExprQuery(qs, filterBuilderExpr)
+    buildWhereFilterQuery(qs, whereBuilderExpr)
     if (debouncedSearch) {
       if (navItem?.hasSimplifiedSearch) qs.set('s', debouncedSearch)
       else qs.set('filter[where][_name][regexp]', `.*${debouncedSearch}.*`)
@@ -694,7 +716,7 @@ export default function ResourcePage() {
     buildFilterFieldsParams(qs, fieldSelectorState)
     buildFilterOrderParams(qs, sortOrder)
     return formatQueryPreview(qs)
-  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, filterBuilderExpr, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
+  }, [page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, filterBuilderExpr, whereBuilderExpr, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
 
   useEffect(() => {
     setPage(0)
@@ -719,6 +741,9 @@ export default function ResourcePage() {
     setSelectedFieldset(null)
     setSortOrder([])
     setFilterBuilderExpr(null)
+    setWhereBuilderExpr(null)
+    setStagedWhereClauses([])
+    setWhereInternalOp('and')
     setStagedSetKeys([])
     setStagedSetMeta({})
   }, [resourcePrefsKey])
@@ -845,6 +870,7 @@ export default function ResourcePage() {
     qs.set(paginationKeys.limitKey, String(pageSize))
     qs.set(paginationKeys.skipKey, String(page * pageSize))
     buildFilterExprQuery(qs, filterBuilderExpr)
+    buildWhereFilterQuery(qs, whereBuilderExpr)
     if (debouncedSearch) {
       if (navItem?.hasSimplifiedSearch) qs.set('s', debouncedSearch)
       else qs.set('filter[where][_name][regexp]', `.*${debouncedSearch}.*`)
@@ -861,7 +887,7 @@ export default function ResourcePage() {
     setResponseStatus(status)
     setRequestHeaders(reqHeaders ?? null)
     return data ?? []
-  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, filterBuilderExpr, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
+  }, [getWithMeta, navItem?.collectionPath, page, pageSize, paginationKeys.limitKey, paginationKeys.skipKey, filterBuilderExpr, whereBuilderExpr, debouncedSearch, selectedQ, selectedFieldset, fieldSelectorState, sortOrder])
 
   const { data, loading, error, refresh } = useResourceList(fetcher)
 
@@ -1191,6 +1217,12 @@ export default function ResourcePage() {
       return next
     })
   }, [fieldSelectorState])
+
+  const handleApplyFilterFromColumn = useCallback((fieldKey) => {
+    if (!fieldKey) return
+    setFilterPanelOpen(true)
+    setStagedWhereClauses((prev) => [...prev, makeEmptyWhereClause(fieldKey)])
+  }, [])
 
   const columns = useMemo(() => {
     const all = deriveColumns(data)
@@ -1538,6 +1570,7 @@ export default function ResourcePage() {
               selectedQ !== null,
               selectedFieldset !== null,
               filterBuilderExpr !== null,
+              whereBuilderExpr !== null,
               fieldSelectorState.mode !== 'all',
               hiddenFields.size > 0,
               hiddenRecordIds.size > 0,
@@ -1638,9 +1671,9 @@ export default function ResourcePage() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-200">Filters</p>
             <div className="flex items-center gap-3">
-              {[selectedQ !== null, selectedFieldset !== null, filterBuilderExpr !== null, fieldSelectorState.mode !== 'all', hiddenFields.size > 0, hiddenRecordIds.size > 0, sortOrder.length > 0].some(Boolean) && (
+              {[selectedQ !== null, selectedFieldset !== null, filterBuilderExpr !== null, whereBuilderExpr !== null, fieldSelectorState.mode !== 'all', hiddenFields.size > 0, hiddenRecordIds.size > 0, sortOrder.length > 0].some(Boolean) && (
                 <button
-                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setFilterBuilderExpr(null); setStagedSetKeys([]); setStagedSetMeta({}); setFieldSelectorState({ mode: 'all', selected: new Set() }); setHiddenFields(new Set()); setHiddenRecordIds(new Set()); setHiddenRecordMeta({}); setSortOrder([]); setPage(0) }}
+                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setFilterBuilderExpr(null); setWhereBuilderExpr(null); setStagedSetKeys([]); setStagedSetMeta({}); setStagedWhereClauses([]); setWhereInternalOp('and'); setFieldSelectorState({ mode: 'all', selected: new Set() }); setHiddenFields(new Set()); setHiddenRecordIds(new Set()); setHiddenRecordMeta({}); setSortOrder([]); setPage(0) }}
                   className="text-xs text-slate-400 hover:text-blue-400 transition-colors"
                 >
                   Clear all
@@ -1882,6 +1915,15 @@ export default function ResourcePage() {
                     </div>
                   )}
                 </div>
+
+                {filterBuilderExpr && (
+                  <div className="pt-2">
+                    <VisualFilterBuilder
+                      expr={filterBuilderExpr}
+                      onChange={(next) => { setFilterBuilderExpr(next); setPage(0) }}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -2107,11 +2149,170 @@ export default function ResourcePage() {
 
           </div>
 
-          {/* ── Visual Filter Builder ── */}
-          {navItem.hasSet && filterBuilderExpr && (
-            <VisualFilterBuilder
-              expr={filterBuilderExpr}
-              onChange={(next) => { setFilterBuilderExpr(next); setPage(0) }}
+          {/* ── Field where-filter builder (separate section) ── */}
+          {navItem.hasFilterWhere && (
+            <>
+              <hr className="border-slate-700" />
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Field Filters</p>
+                <div className="space-y-2.5">
+                  {stagedWhereClauses.length > 0 && (
+                    <div className="space-y-2">
+                      {stagedWhereClauses.map((clause) => {
+                        const needsSecondValue = WHERE_OP_SECOND_VALUE.has(clause.op)
+                        const isListOp = clause.op === 'inq' || clause.op === 'nin'
+                        return (
+                          <div key={clause.id} className="grid grid-cols-[minmax(120px,1fr)_minmax(100px,130px)_minmax(140px,1fr)_auto] gap-2 items-start">
+                            <select
+                              value={clause.field}
+                              onChange={(e) => setStagedWhereClauses((prev) => prev.map((c) => c.id === clause.id ? { ...c, field: e.target.value } : c))}
+                              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                              <option value="">field…</option>
+                              {availableFields.map((f) => <option key={f} value={f}>{f}</option>)}
+                            </select>
+                            <select
+                              value={clause.op}
+                              onChange={(e) => setStagedWhereClauses((prev) => prev.map((c) => c.id === clause.id ? { ...c, op: e.target.value } : c))}
+                              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                              {WHERE_OPERATOR_OPTIONS.map((op) => <option key={op.value} value={op.value}>{op.label}</option>)}
+                            </select>
+                            <div className="space-y-1">
+                              <input
+                                type="text"
+                                value={clause.value}
+                                onChange={(e) => setStagedWhereClauses((prev) => prev.map((c) => c.id === clause.id ? { ...c, value: e.target.value } : c))}
+                                placeholder={isListOp ? 'v1, v2, v3' : 'value'}
+                                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                              {needsSecondValue && (
+                                <input
+                                  type="text"
+                                  value={clause.value2}
+                                  onChange={(e) => setStagedWhereClauses((prev) => prev.map((c) => c.id === clause.id ? { ...c, value2: e.target.value } : c))}
+                                  placeholder="second value"
+                                  className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setStagedWhereClauses((prev) => prev.filter((c) => c.id !== clause.id))}
+                              className="mt-1 text-slate-500 hover:text-rose-400 transition-colors"
+                              aria-label="Remove clause"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {stagedWhereClauses.length > 1 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-500 uppercase tracking-wider">Join staged with</span>
+                      <div className="inline-flex rounded border border-slate-700 overflow-hidden">
+                        {['and', 'or'].map((op) => (
+                          <button
+                            key={op}
+                            type="button"
+                            onClick={() => setWhereInternalOp(op)}
+                            className={`px-2 py-0.5 text-[10px] font-mono uppercase border-r border-slate-700 last:border-r-0 transition-colors ${
+                              whereInternalOp === op
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                            }`}
+                          >
+                            {op}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStagedWhereClauses((prev) => [...prev, makeEmptyWhereClause()])}
+                      className="px-2.5 py-1 text-xs rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700"
+                    >
+                      Add clause
+                    </button>
+
+                    {whereBuilderExpr === null ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const block = buildWhereBlockFromClauses(stagedWhereClauses, whereInternalOp)
+                          if (!block) return
+                          setWhereBuilderExpr(block)
+                          setStagedWhereClauses([])
+                          setWhereInternalOp('and')
+                          setPage(0)
+                        }}
+                        disabled={stagedWhereClauses.length === 0}
+                        className="px-2.5 py-1 text-[10px] font-bold font-mono uppercase rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        Apply
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const block = buildWhereBlockFromClauses(stagedWhereClauses, whereInternalOp)
+                            if (!block) return
+                            setWhereBuilderExpr((prev) => appendWhereBlock(prev, block, 'and'))
+                            setStagedWhereClauses([])
+                            setWhereInternalOp('and')
+                            setPage(0)
+                          }}
+                          disabled={stagedWhereClauses.length === 0}
+                          className="px-2.5 py-1 text-[10px] font-bold font-mono uppercase rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          +and
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const block = buildWhereBlockFromClauses(stagedWhereClauses, whereInternalOp)
+                            if (!block) return
+                            setWhereBuilderExpr((prev) => appendWhereBlock(prev, block, 'or'))
+                            setStagedWhereClauses([])
+                            setWhereInternalOp('and')
+                            setPage(0)
+                          }}
+                          disabled={stagedWhereClauses.length === 0}
+                          className="px-2.5 py-1 text-[10px] font-bold font-mono uppercase rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          +or
+                        </button>
+                      </>
+                    )}
+
+                    {stagedWhereClauses.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => { setStagedWhereClauses([]); setWhereInternalOp('and') }}
+                        className="px-2 py-1 text-xs text-slate-500 hover:text-slate-200"
+                      >
+                        Clear staged
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {navItem.hasFilterWhere && whereBuilderExpr && (
+            <VisualWhereFilterBuilder
+              expr={whereBuilderExpr}
+              onChange={(next) => { setWhereBuilderExpr(next); setPage(0) }}
             />
           )}
 
@@ -2977,6 +3178,7 @@ export default function ResourcePage() {
           onResolveField={navItem?.itemPathTemplate && navItem?.itemMethods?.includes('get') ? handleResolveField : undefined}
           onResolveTraversalField={handleResolveTraversalField}
           onTraversalRelateToList={handleTraversalRelateToList}
+          onColumnApplyFilter={navItem?.hasFilterWhere ? handleApplyFilterFromColumn : undefined}
           onColumnDeselectField={handleDeselectFieldFromColumn}
           onColumnHideField={handleHideFieldFromColumn}
           selectedRowIds={selectedRowIds}
@@ -3217,6 +3419,34 @@ export default function ResourcePage() {
                     <div className="flex flex-wrap gap-1.5">
                       {keys.map((k) => (
                         <span key={k} className="px-2 py-0.5 text-xs rounded-md bg-violet-600/20 text-violet-300 border border-violet-700 font-mono">{k}</span>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {whereBuilderExpr && (() => {
+                const collectConditions = (node) => {
+                  if (!node) return []
+                  if (node.type === 'condition') return [node]
+                  if (node.type === 'group') return collectConditions(node.child)
+                  if (node.type === 'or' || node.type === 'and') return node.children.flatMap(collectConditions)
+                  return []
+                }
+                const conditions = collectConditions(whereBuilderExpr)
+                if (!conditions.length) return null
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Field filter</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {conditions.map((c, idx) => (
+                        <span key={`${c.field}-${c.op}-${idx}`} className="px-2 py-0.5 text-xs rounded-md bg-blue-600/20 text-blue-300 border border-blue-700 font-mono">
+                          {c.op === 'between'
+                            ? `${c.field} between ${c.value} and ${c.value2}`
+                            : c.op === 'inq' || c.op === 'nin'
+                              ? `${c.field} ${c.op} [${c.value}]`
+                              : `${c.field} ${c.op} ${c.value}`}
+                        </span>
                       ))}
                     </div>
                   </div>
