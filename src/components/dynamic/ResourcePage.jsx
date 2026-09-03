@@ -111,6 +111,8 @@ function buildFilterOrderParams(qs, sortOrder) {
   }
 }
 
+const FILTER_CONTROL_CLASS = 'h-[30px] rounded-lg border border-slate-700 bg-slate-800 px-2.5 text-xs text-slate-300 transition-colors hover:border-slate-500 hover:text-white focus:border-slate-500 focus:outline-none focus:ring-0'
+
 function makeEmptyWhereClause(field = '') {
   return {
     id: `wf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -203,6 +205,31 @@ function formatClaimValue(value) {
     return <span className="text-slate-400 font-mono text-[10px] break-all">{JSON.stringify(value)}</span>
   }
   return <span className="text-slate-300 font-mono break-all">{String(value)}</span>
+}
+
+function removeSetKeysFromExpr(node, keysToRemove) {
+  if (!node) return null
+
+  if (node.type === 'set') {
+    return keysToRemove.includes(node.key) ? null : node
+  }
+
+  if (node.type === 'group') {
+    const inner = removeSetKeysFromExpr(node.child, keysToRemove)
+    return inner ? { ...node, child: inner } : null
+  }
+
+  if (node.type === 'or' || node.type === 'and') {
+    const children = node.children
+      .map((child) => removeSetKeysFromExpr(child, keysToRemove))
+      .filter(Boolean)
+
+    if (children.length === 0) return null
+    if (children.length === 1) return children[0]
+    return { ...node, children }
+  }
+
+  return node
 }
 
 function IdentityTab({ token }) {
@@ -1708,14 +1735,14 @@ export default function ResourcePage() {
                 <div className="relative">
                   {/* Trigger row: fused control group */}
                   <div className="flex items-center">
-                    <div className={`inline-flex rounded-lg border divide-x overflow-hidden ${setsDropdownOpen || stagedSetKeys.length > 0 ? 'border-blue-600 divide-blue-600' : 'border-slate-700 divide-slate-700'}`}>
+                    <div className="inline-flex h-[30px] overflow-hidden rounded-lg border border-slate-700 bg-slate-800 transition-colors hover:border-slate-500 focus-within:border-slate-500">
 
                       {/* Dropdown trigger */}
                       <button
                         onClick={() => setSetsDropdownOpen((v) => !v)}
-                        className={`flex items-center justify-between px-2.5 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 transition-colors min-w-[140px] ${setsDropdownOpen || stagedSetKeys.length > 0 ? 'text-blue-300' : 'text-slate-300 hover:text-white'}`}
+                        className={`flex h-full w-[180px] items-center justify-between bg-slate-800 px-2.5 text-xs transition-colors outline-none hover:text-white focus:outline-none focus:ring-0 ${setsDropdownOpen || stagedSetKeys.length > 0 ? 'text-slate-300' : 'text-slate-300'}`}
                       >
-                        <span className="truncate mr-1.5">
+                        <span className="flex-1 min-w-0 truncate text-left mr-1.5">
                           {stagedSetKeys.length > 0
                             ? stagedSetKeys.join(', ')
                             : <span className="text-slate-500">— select sets —</span>}
@@ -1739,7 +1766,7 @@ export default function ResourcePage() {
                             setPage(0)
                           }}
                           title="Add staged sets to the filter"
-                          className="px-2.5 py-1.5 text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="flex h-full items-center px-2.5 text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           Add
                         </button>
@@ -1759,7 +1786,7 @@ export default function ResourcePage() {
                               setPage(0)
                             }}
                             title="Append staged sets to the filter builder, joined to the existing expression with AND"
-                            className="px-2.5 py-1.5 text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            className="flex h-full items-center px-2.5 text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                           >
                             +and
                           </button>
@@ -1777,7 +1804,7 @@ export default function ResourcePage() {
                               setPage(0)
                             }}
                             title="Append staged sets to the filter builder, joined to the existing expression with OR"
-                            className="px-2.5 py-1.5 text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            className="flex h-full items-center px-2.5 text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                           >
                             +or
                           </button>
@@ -1788,7 +1815,7 @@ export default function ResourcePage() {
                       {stagedSetKeys.length > 0 && (
                         <button
                           onClick={() => { setStagedSetKeys([]); setStagedSetMeta({}) }}
-                          className="flex items-center justify-center px-2 bg-slate-800 text-slate-500 hover:text-white hover:bg-slate-700 transition-colors"
+                          className="flex h-full items-center justify-center px-2 bg-slate-800 text-slate-500 hover:text-white hover:bg-slate-700 transition-colors"
                           title="Clear staged selection"
                           aria-label="Clear staged selection"
                         >
@@ -1923,14 +1950,6 @@ export default function ResourcePage() {
                   )}
                 </div>
 
-                {filterBuilderExpr && (
-                  <div className="pt-2">
-                    <VisualFilterBuilder
-                      expr={filterBuilderExpr}
-                      onChange={(next) => { setFilterBuilderExpr(next); setPage(0) }}
-                    />
-                  </div>
-                )}
               </div>
             )}
 
@@ -1941,7 +1960,7 @@ export default function ResourcePage() {
                 <div className="relative">
                   <button
                     onClick={() => setQDropdownOpen((v) => !v)}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                    className={`${FILTER_CONTROL_CLASS} flex w-full items-center justify-between`}
                   >
                     <span className="truncate">
                       {selectedQ
@@ -1985,7 +2004,7 @@ export default function ResourcePage() {
                 <div className="relative">
                   <button
                     onClick={() => setFieldsetDropdownOpen((v) => !v)}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                    className={`${FILTER_CONTROL_CLASS} flex w-full items-center justify-between`}
                   >
                     <span className="truncate">
                       {selectedFieldset
@@ -2022,13 +2041,12 @@ export default function ResourcePage() {
               </div>
             )}
 
-            {/* ── Status multi-select buttons (OR logic) ── */}
+            {/* ── Status dropdown ── */}
             {navItem.hasSet && navItem.hasValidityDates && navItem.setSchemaProps && ['actives', 'pendings', 'expireds'].some((k) => k in navItem.setSchemaProps) && (
               <div className="space-y-1.5">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Status</p>
                 {(() => {
                   const statusKeys = ['actives', 'pendings', 'expireds'].filter((k) => k in navItem.setSchemaProps)
-                  // Derive currently-active status keys from the filter expression
                   const activeStatusKeys = (() => {
                     if (!filterBuilderExpr) return []
                     const collect = (node) => {
@@ -2040,57 +2058,36 @@ export default function ResourcePage() {
                     }
                     return collect(filterBuilderExpr)
                   })()
+                  const selectedStatus = activeStatusKeys.length === 1 ? activeStatusKeys[0] : ''
+
                   return (
-                    <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
-                      {statusKeys.map((key) => {
-                        const selected = activeStatusKeys.includes(key)
-                        const label = key.charAt(0).toUpperCase() + key.slice(1)
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => {
-                              setPage(0)
-                              if (selected) {
-                                // Remove this key from the expression
-                                setFilterBuilderExpr((prev) => {
-                                  if (!prev) return null
-                                  const removeKey = (node) => {
-                                    if (!node) return null
-                                    if (node.type === 'set') return node.key === key ? null : node
-                                    if (node.type === 'group') {
-                                      const inner = removeKey(node.child)
-                                      return inner ? { ...node, child: inner } : null
-                                    }
-                                    if (node.type === 'or' || node.type === 'and') {
-                                      const children = node.children.map(removeKey).filter(Boolean)
-                                      if (children.length === 0) return null
-                                      if (children.length === 1) return children[0]
-                                      return { ...node, children }
-                                    }
-                                    return node
-                                  }
-                                  return removeKey(prev)
-                                })
-                              } else {
-                                // Add key via OR
-                                setFilterBuilderExpr((prev) => appendBlock(prev, makeSet(key), 'or'))
-                              }
-                            }}
-                            className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
-                              selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        )
-                      })}
+                    <div className="relative">
+                      <select
+                        value={selectedStatus}
+                        onChange={(e) => {
+                          const nextValue = e.target.value
+                          setPage(0)
+                          setFilterBuilderExpr((prev) => {
+                            const withoutStatus = removeSetKeysFromExpr(prev, statusKeys)
+                            if (!nextValue) return withoutStatus
+                            return appendBlock(withoutStatus, makeSet(nextValue), 'or')
+                          })
+                        }}
+                        className={`${FILTER_CONTROL_CLASS} min-w-[130px] appearance-none pr-7 ${selectedStatus ? 'text-slate-200 hover:text-white' : 'text-slate-500 hover:text-white'}`}
+                      >
+                        <option value="" className="text-slate-500">— none —</option>
+                        {statusKeys.map((key) => (
+                          <option key={key} value={key} className="text-slate-200">{key.replace(/s$/, '').charAt(0).toUpperCase() + key.replace(/s$/, '').slice(1)}</option>
+                        ))}
+                      </select>
+                      <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
                     </div>
                   )
                 })()}
               </div>
             )}
 
-            {/* ── Visibility multi-select buttons (OR logic) ── */}
+            {/* ── Visibility dropdown ── */}
             {navItem.hasSet && navItem.setSchemaProps && ['publics', 'protecteds', 'privates'].some((k) => k in navItem.setSchemaProps) && (
               <div className="space-y-1.5">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Visibility</p>
@@ -2107,54 +2104,236 @@ export default function ResourcePage() {
                     }
                     return collect(filterBuilderExpr)
                   })()
+                  const selectedVisibility = activeVisKeys.length === 1 ? activeVisKeys[0] : ''
+
                   return (
-                    <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
-                      {[{ key: 'publics', label: 'Public' }, { key: 'protecteds', label: 'Protected' }, { key: 'privates', label: 'Private' }].filter(({ key }) => key in navItem.setSchemaProps).map(({ key, label }) => {
-                        const selected = activeVisKeys.includes(key)
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => {
-                              setPage(0)
-                              if (selected) {
-                                setFilterBuilderExpr((prev) => {
-                                  if (!prev) return null
-                                  const removeKey = (node) => {
-                                    if (!node) return null
-                                    if (node.type === 'set') return node.key === key ? null : node
-                                    if (node.type === 'group') {
-                                      const inner = removeKey(node.child)
-                                      return inner ? { ...node, child: inner } : null
-                                    }
-                                    if (node.type === 'or' || node.type === 'and') {
-                                      const children = node.children.map(removeKey).filter(Boolean)
-                                      if (children.length === 0) return null
-                                      if (children.length === 1) return children[0]
-                                      return { ...node, children }
-                                    }
-                                    return node
-                                  }
-                                  return removeKey(prev)
-                                })
-                              } else {
-                                setFilterBuilderExpr((prev) => appendBlock(prev, makeSet(key), 'or'))
-                              }
-                            }}
-                            className={`px-3 py-1.5 text-xs border-r border-slate-700 last:border-r-0 transition-colors ${
-                              selected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        )
-                      })}
+                    <div className="relative">
+                      <select
+                        value={selectedVisibility}
+                        onChange={(e) => {
+                          const nextValue = e.target.value
+                          setPage(0)
+                          setFilterBuilderExpr((prev) => {
+                            const withoutVisibility = removeSetKeysFromExpr(prev, visKeys)
+                            if (!nextValue) return withoutVisibility
+                            return appendBlock(withoutVisibility, makeSet(nextValue), 'or')
+                          })
+                        }}
+                        className={`${FILTER_CONTROL_CLASS} min-w-[140px] appearance-none pr-7 ${selectedVisibility ? 'text-slate-200 hover:text-white' : 'text-slate-500 hover:text-white'}`}
+                      >
+                        <option value="" className="text-slate-500">— none —</option>
+                        {visKeys.map((key) => (
+                          <option key={key} value={key} className="text-slate-200">{key.replace(/s$/, '').charAt(0).toUpperCase() + key.replace(/s$/, '').slice(1)}</option>
+                        ))}
+                      </select>
+                      <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
                     </div>
                   )
                 })()}
               </div>
             )}
 
+            {/* ── Field visibility ── */}
+            {showFieldSelector && (() => {
+              const checkedCount = fieldSelectorState.mode === 'all'
+                ? availableFields.length
+                : fieldSelectorState.mode === 'none'
+                  ? 0
+                  : fieldSelectorState.mode === 'include'
+                    ? fieldSelectorState.selected.size
+                    : availableFields.length - fieldSelectorState.selected.size
+              const triggerLabel = fieldSelectorState.mode === 'all'
+                ? 'All fields'
+                : checkedCount === 0
+                  ? 'No fields'
+                  : `${checkedCount} field${checkedCount !== 1 ? 's' : ''}`
+              const filteredFields = fieldSearch
+                ? availableFields.filter((f) => f.toLowerCase().includes(fieldSearch.toLowerCase()))
+                : availableFields
+              return (
+                <div className="flex items-start gap-6">
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Retrieved Fields</p>
+                    <div className="relative" ref={fieldDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => setFieldDropdownOpen((v) => !v)}
+                        className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg min-w-[150px] bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                      >
+                        <span className={fieldSelectorState.mode === 'all' ? 'text-slate-400' : 'text-blue-300'}>{triggerLabel}</span>
+                        <svg className={`w-3 h-3 text-slate-500 transition-transform shrink-0 ${fieldDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                        </svg>
+                      </button>
+                      {fieldDropdownOpen && (
+                        <div className="absolute z-30 mt-1 w-full min-w-[200px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                          <div className="relative border-b border-slate-700">
+                            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
+                            </svg>
+                            <input
+                              type="text"
+                              value={fieldSearch}
+                              onChange={(e) => setFieldSearch(e.target.value)}
+                              placeholder="Filter fields…"
+                              className="w-full pl-7 pr-7 py-1.5 text-xs bg-transparent text-slate-200 placeholder-slate-500 focus:outline-none"
+                            />
+                            {fieldSearch && (
+                              <button onClick={() => setFieldSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label="Clear search">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-700/60">
+                            <button onClick={() => setFieldSelectorState({ mode: 'all', selected: new Set() })} className="text-[10px] text-slate-400 hover:text-slate-200 underline">All</button>
+                            <button onClick={() => { setFieldSelectorState({ mode: 'none', selected: new Set() }); setHiddenFields(new Set()) }} className="text-[10px] text-slate-400 hover:text-slate-200 underline">None</button>
+                          </div>
+                          <div className="max-h-52 overflow-y-auto py-1">
+                            {availableFields.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-slate-500">No fields found.</p>
+                            ) : filteredFields.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-slate-500">No match for &ldquo;{fieldSearch}&rdquo;.</p>
+                            ) : filteredFields.map((field) => {
+                              const checked = isFieldChecked(field, fieldSelectorState)
+                              return (
+                                <label key={field} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-slate-800 group">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      setFieldSelectorState((prev) => {
+                                        const wasChecked = isFieldChecked(field, prev)
+                                        const next = toggleFieldSelection(field, availableFields, prev)
+                                        const isCheckedNext = isFieldChecked(field, next)
+                                        if (wasChecked && !isCheckedNext) {
+                                          setHiddenFields((hiddenPrev) => {
+                                            if (!hiddenPrev.has(field)) return hiddenPrev
+                                            const hiddenNext = new Set(hiddenPrev)
+                                            hiddenNext.delete(field)
+                                            return hiddenNext
+                                          })
+                                        }
+                                        return next
+                                      })
+                                    }}
+                                    className="w-3.5 h-3.5 rounded accent-blue-500 cursor-pointer shrink-0"
+                                  />
+                                  <span className="text-xs font-mono text-slate-300 group-hover:text-white truncate">{field}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Hidden Fields</p>
+                    <div className="relative" ref={hiddenFieldDropdownRef}>
+                      {(() => {
+                        const retrievedFields = availableFields.filter((field) => isFieldChecked(field, fieldSelectorState))
+                        const hiddenRetrievedCount = retrievedFields.filter((field) => hiddenFields.has(field)).length
+                        const hiddenTriggerLabel = hiddenRetrievedCount === 0 ? 'No hidden fields' : `${hiddenRetrievedCount} hidden`
+                        const hiddenSearch = hiddenFieldSearch.trim().toLowerCase()
+                        const filteredRetrievedFields = hiddenSearch
+                          ? retrievedFields.filter((field) => field.toLowerCase().includes(hiddenSearch))
+                          : retrievedFields
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setHiddenFieldDropdownOpen((v) => !v)}
+                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+                            >
+                              <span className={hiddenRetrievedCount > 0 ? 'text-amber-300' : 'text-slate-400'}>{hiddenTriggerLabel}</span>
+                              <svg className={`w-3 h-3 text-slate-500 transition-transform shrink-0 ${hiddenFieldDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                              </svg>
+                            </button>
+                            {hiddenFieldDropdownOpen && (
+                              <div className="absolute z-30 mt-1 w-full min-w-[220px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                                <div className="relative border-b border-slate-700">
+                                  <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
+                                  </svg>
+                                  <input
+                                    type="text"
+                                    value={hiddenFieldSearch}
+                                    onChange={(e) => setHiddenFieldSearch(e.target.value)}
+                                    placeholder="Filter retrieved fields…"
+                                    className="w-full pl-7 pr-7 py-1.5 text-xs bg-transparent text-slate-200 placeholder-slate-500 focus:outline-none"
+                                  />
+                                  {hiddenFieldSearch && (
+                                    <button onClick={() => setHiddenFieldSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label="Clear hidden field search">
+                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                      </svg>
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-700/60">
+                                  <button
+                                    onClick={() => setHiddenFields(new Set(retrievedFields))}
+                                    className="text-[10px] text-slate-400 hover:text-slate-200 underline"
+                                  >
+                                    All
+                                  </button>
+                                  <button
+                                    onClick={() => setHiddenFields(new Set())}
+                                    className="text-[10px] text-slate-400 hover:text-slate-200 underline"
+                                  >
+                                    None
+                                  </button>
+                                </div>
+                                <div className="max-h-52 overflow-y-auto py-1">
+                                  {retrievedFields.length === 0 ? (
+                                    <p className="px-3 py-2 text-xs text-slate-500">No retrieved fields selected.</p>
+                                  ) : filteredRetrievedFields.length === 0 ? (
+                                    <p className="px-3 py-2 text-xs text-slate-500">No match for &ldquo;{hiddenFieldSearch}&rdquo;.</p>
+                                  ) : filteredRetrievedFields.map((field) => {
+                                    const checked = hiddenFields.has(field)
+                                    return (
+                                      <label key={field} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-slate-800 group">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => {
+                                            setHiddenFields((prev) => {
+                                              const next = new Set(prev)
+                                              if (next.has(field)) next.delete(field)
+                                              else next.add(field)
+                                              return next
+                                            })
+                                          }}
+                                          className="w-3.5 h-3.5 rounded accent-amber-500 cursor-pointer shrink-0"
+                                        />
+                                        <span className="text-xs font-mono text-slate-300 group-hover:text-white truncate">{field}</span>
+                                      </label>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+
           </div>
+
+          {filterBuilderExpr && (
+            <VisualFilterBuilder
+              expr={filterBuilderExpr}
+              onChange={(next) => { setFilterBuilderExpr(next); setPage(0) }}
+            />
+          )}
 
           {/* ── Field where-filter builder (separate section) ── */}
           {navItem.hasFilterWhere && (
@@ -2245,27 +2424,28 @@ export default function ResourcePage() {
                     <button
                       type="button"
                       onClick={() => setStagedWhereClauses((prev) => [...prev, makeEmptyWhereClause()])}
-                      className="px-2.5 py-1 text-xs rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700"
+                      className="px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
                     >
-                      Add clause
+                      Add Clause
                     </button>
 
                     {whereBuilderExpr === null ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const block = buildWhereBlockFromClauses(stagedWhereClauses, whereInternalOp)
-                          if (!block) return
-                          setWhereBuilderExpr(block)
-                          setStagedWhereClauses([])
-                          setWhereInternalOp('and')
-                          setPage(0)
-                        }}
-                        disabled={stagedWhereClauses.length === 0}
-                        className="px-2.5 py-1 text-[10px] font-bold font-mono uppercase rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        Apply
-                      </button>
+                      stagedWhereClauses.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const block = buildWhereBlockFromClauses(stagedWhereClauses, whereInternalOp)
+                            if (!block) return
+                            setWhereBuilderExpr(block)
+                            setStagedWhereClauses([])
+                            setWhereInternalOp('and')
+                            setPage(0)
+                          }}
+                          className="px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+                        >
+                          Apply
+                        </button>
+                      )
                     ) : (
                       <>
                         <button
@@ -2279,7 +2459,7 @@ export default function ResourcePage() {
                             setPage(0)
                           }}
                           disabled={stagedWhereClauses.length === 0}
-                          className="px-2.5 py-1 text-[10px] font-bold font-mono uppercase rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           +and
                         </button>
@@ -2294,7 +2474,7 @@ export default function ResourcePage() {
                             setPage(0)
                           }}
                           disabled={stagedWhereClauses.length === 0}
-                          className="px-2.5 py-1 text-[10px] font-bold font-mono uppercase rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="px-2.5 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           +or
                         </button>
@@ -2322,203 +2502,6 @@ export default function ResourcePage() {
               onChange={(next) => { setWhereBuilderExpr(next); setPage(0) }}
             />
           )}
-
-          {/* Column selector */}
-          {showFieldSelector && (() => {
-            const checkedCount = fieldSelectorState.mode === 'all'
-              ? availableFields.length
-              : fieldSelectorState.mode === 'none'
-                ? 0
-                : fieldSelectorState.mode === 'include'
-                  ? fieldSelectorState.selected.size
-                  : availableFields.length - fieldSelectorState.selected.size
-            const triggerLabel = fieldSelectorState.mode === 'all'
-              ? 'All fields'
-              : checkedCount === 0
-                ? 'No fields'
-                : `${checkedCount} field${checkedCount !== 1 ? 's' : ''}`
-            const filteredFields = fieldSearch
-              ? availableFields.filter((f) => f.toLowerCase().includes(fieldSearch.toLowerCase()))
-              : availableFields
-            return (
-              <>
-                <hr className="border-slate-700" />
-                <div className="space-y-1.5">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Field Visibility</p>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2" ref={fieldDropdownRef}>
-                      <p className="text-[10px] text-slate-500 shrink-0">Retrieved Fields</p>
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() => setFieldDropdownOpen((v) => !v)}
-                          className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
-                        >
-                          <span className={fieldSelectorState.mode === 'all' ? 'text-slate-400' : 'text-blue-300'}>{triggerLabel}</span>
-                          <svg className={`w-3 h-3 text-slate-500 transition-transform shrink-0 ${fieldDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                          </svg>
-                        </button>
-                        {fieldDropdownOpen && (
-                        <div className="absolute z-30 mt-1 w-full min-w-[200px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
-                          <div className="relative border-b border-slate-700">
-                            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
-                            </svg>
-                            <input
-                              type="text"
-                              value={fieldSearch}
-                              onChange={(e) => setFieldSearch(e.target.value)}
-                              placeholder="Filter fields…"
-                              className="w-full pl-7 pr-7 py-1.5 text-xs bg-transparent text-slate-200 placeholder-slate-500 focus:outline-none"
-                            />
-                            {fieldSearch && (
-                              <button onClick={() => setFieldSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label="Clear search">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-700/60">
-                            <button onClick={() => setFieldSelectorState({ mode: 'all', selected: new Set() })} className="text-[10px] text-slate-400 hover:text-slate-200 underline">All</button>
-                            <button onClick={() => { setFieldSelectorState({ mode: 'none', selected: new Set() }); setHiddenFields(new Set()) }} className="text-[10px] text-slate-400 hover:text-slate-200 underline">None</button>
-                          </div>
-                          <div className="max-h-52 overflow-y-auto py-1">
-                            {availableFields.length === 0 ? (
-                              <p className="px-3 py-2 text-xs text-slate-500">No fields found.</p>
-                            ) : filteredFields.length === 0 ? (
-                              <p className="px-3 py-2 text-xs text-slate-500">No match for &ldquo;{fieldSearch}&rdquo;.</p>
-                            ) : filteredFields.map((field) => {
-                              const checked = isFieldChecked(field, fieldSelectorState)
-                              return (
-                                <label key={field} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-slate-800 group">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => {
-                                      setFieldSelectorState((prev) => {
-                                        const wasChecked = isFieldChecked(field, prev)
-                                        const next = toggleFieldSelection(field, availableFields, prev)
-                                        const isCheckedNext = isFieldChecked(field, next)
-                                        if (wasChecked && !isCheckedNext) {
-                                          setHiddenFields((hiddenPrev) => {
-                                            if (!hiddenPrev.has(field)) return hiddenPrev
-                                            const hiddenNext = new Set(hiddenPrev)
-                                            hiddenNext.delete(field)
-                                            return hiddenNext
-                                          })
-                                        }
-                                        return next
-                                      })
-                                    }}
-                                    className="w-3.5 h-3.5 rounded accent-blue-500 cursor-pointer shrink-0"
-                                  />
-                                  <span className="text-xs font-mono text-slate-300 group-hover:text-white truncate">{field}</span>
-                                </label>
-                              )
-                            })}
-                          </div>
-                        </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2" ref={hiddenFieldDropdownRef}>
-                      <p className="text-[10px] text-slate-500 shrink-0">Hidden Fields</p>
-                      {(() => {
-                        const retrievedFields = availableFields.filter((field) => isFieldChecked(field, fieldSelectorState))
-                        const hiddenRetrievedCount = retrievedFields.filter((field) => hiddenFields.has(field)).length
-                        const hiddenTriggerLabel = hiddenRetrievedCount === 0 ? 'No hidden fields' : `${hiddenRetrievedCount} hidden`
-                        const hiddenSearch = hiddenFieldSearch.trim().toLowerCase()
-                        const filteredRetrievedFields = hiddenSearch
-                          ? retrievedFields.filter((field) => field.toLowerCase().includes(hiddenSearch))
-                          : retrievedFields
-                        return (
-                          <div className="relative">
-                            <button
-                              type="button"
-                              onClick={() => setHiddenFieldDropdownOpen((v) => !v)}
-                              className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
-                            >
-                              <span className={hiddenRetrievedCount > 0 ? 'text-amber-300' : 'text-slate-400'}>{hiddenTriggerLabel}</span>
-                              <svg className={`w-3 h-3 text-slate-500 transition-transform shrink-0 ${hiddenFieldDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                              </svg>
-                            </button>
-                            {hiddenFieldDropdownOpen && (
-                              <div className="absolute z-30 mt-1 w-full min-w-[220px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
-                                <div className="relative border-b border-slate-700">
-                                  <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
-                                  </svg>
-                                  <input
-                                    type="text"
-                                    value={hiddenFieldSearch}
-                                    onChange={(e) => setHiddenFieldSearch(e.target.value)}
-                                    placeholder="Filter retrieved fields…"
-                                    className="w-full pl-7 pr-7 py-1.5 text-xs bg-transparent text-slate-200 placeholder-slate-500 focus:outline-none"
-                                  />
-                                  {hiddenFieldSearch && (
-                                    <button onClick={() => setHiddenFieldSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label="Clear hidden field search">
-                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                      </svg>
-                                    </button>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-700/60">
-                                  <button
-                                    onClick={() => setHiddenFields(new Set(retrievedFields))}
-                                    className="text-[10px] text-slate-400 hover:text-slate-200 underline"
-                                  >
-                                    All
-                                  </button>
-                                  <button
-                                    onClick={() => setHiddenFields(new Set())}
-                                    className="text-[10px] text-slate-400 hover:text-slate-200 underline"
-                                  >
-                                    None
-                                  </button>
-                                </div>
-                                <div className="max-h-52 overflow-y-auto py-1">
-                                  {retrievedFields.length === 0 ? (
-                                    <p className="px-3 py-2 text-xs text-slate-500">No retrieved fields selected.</p>
-                                  ) : filteredRetrievedFields.length === 0 ? (
-                                    <p className="px-3 py-2 text-xs text-slate-500">No match for &ldquo;{hiddenFieldSearch}&rdquo;.</p>
-                                  ) : filteredRetrievedFields.map((field) => {
-                                    const checked = hiddenFields.has(field)
-                                    return (
-                                      <label key={field} className="flex items-center gap-2 px-3 py-1 cursor-pointer hover:bg-slate-800 group">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={() => {
-                                            setHiddenFields((prev) => {
-                                              const next = new Set(prev)
-                                              if (next.has(field)) next.delete(field)
-                                              else next.add(field)
-                                              return next
-                                            })
-                                          }}
-                                          className="w-3.5 h-3.5 rounded accent-amber-500 cursor-pointer shrink-0"
-                                        />
-                                        <span className="text-xs font-mono text-slate-300 group-hover:text-white truncate">{field}</span>
-                                      </label>
-                                    )
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              </>
-            )
-          })()}
 
           {/* Sort */}
           {navItem.hasFilterOrder && (
