@@ -1163,6 +1163,13 @@ export default function ResourcePage() {
     return resolveFieldWithTemplate(fieldKey, rows, navItem.itemPathTemplate)
   }, [resolveFieldWithTemplate, navItem?.itemPathTemplate, navItem?.itemMethods])
 
+  // Resolve a reference field using an explicit item path template.
+  // Used by synthetic traversal tabs (Related Entity/List) where no traversal path exists.
+  const handleResolveFieldWithTemplate = useCallback(async (fieldKey, rows, itemPathTemplate) => {
+    if (!itemPathTemplate) return new Map()
+    return resolveFieldWithTemplate(fieldKey, rows, itemPathTemplate)
+  }, [resolveFieldWithTemplate])
+
   // Resolve a reference field for traversal items.
   // Finds the navItem whose collectionPath matches the traversal subResource, then uses its itemPathTemplate.
   const handleResolveTraversalField = useCallback(async (fieldKey, rows, traversalPathTemplate) => {
@@ -3177,6 +3184,7 @@ export default function ResourcePage() {
           onFetchRelatedRecord={handleFetchRelatedRecord}
           onResolveField={navItem?.itemPathTemplate && navItem?.itemMethods?.includes('get') ? handleResolveField : undefined}
           onResolveTraversalField={handleResolveTraversalField}
+          onResolveFieldWithTemplate={handleResolveFieldWithTemplate}
           onTraversalRelateToList={handleTraversalRelateToList}
           onColumnApplyFilter={navItem?.hasFilterWhere ? handleApplyFilterFromColumn : undefined}
           onColumnDeselectField={handleDeselectFieldFromColumn}

@@ -167,7 +167,7 @@ function renderCompactValue(key, value, type) {
   return <span className="text-slate-200 text-[11px] font-mono" title={str.length > 32 ? str : undefined}>{display}</span>
 }
 
-const EXCLUDE_FROM_PANEL = new Set(['_id', '_name', '_kind'])
+const EXCLUDE_FROM_PANEL = new Set(['_id', '_name', '_kind', '_resolveItemPathTemplate'])
 
 const ACCESS_FIELDS = new Set([
   '_visibility',
@@ -786,6 +786,7 @@ function ExpandedRowPanel({
   onFetchRelation,
   onResolveField, onViewRecord,
   onResolveTraversalField,
+  onResolveFieldWithTemplate,
 }) {
   const displayRecord = fullRecord ?? row
   const title = displayRecord._name ?? displayRecord._kind ?? null
@@ -1017,9 +1018,12 @@ function ExpandedRowPanel({
                   // This ensures the lookup uses the traversal resource's own item endpoint
                   // (e.g. /lists/bookshelves/{id}) rather than the parent resource's endpoint.
                   const traversalPathTemplate = selectedTraversal?.pathTemplate
-                  const resolveForItem = onResolveTraversalField && traversalPathTemplate
-                    ? (fieldKey, rows) => onResolveTraversalField(fieldKey, rows, traversalPathTemplate)
-                    : onResolveField
+                  const syntheticItemTemplate = selectedTraversal?.synthetic ? item?._resolveItemPathTemplate : null
+                  const resolveForItem = onResolveFieldWithTemplate && syntheticItemTemplate
+                    ? (fieldKey, rows) => onResolveFieldWithTemplate(fieldKey, rows, syntheticItemTemplate)
+                    : onResolveTraversalField && traversalPathTemplate
+                      ? (fieldKey, rows) => onResolveTraversalField(fieldKey, rows, traversalPathTemplate)
+                      : onResolveField
                   return (
                   <RelatedItemCard
                     key={item._id ?? idx}
@@ -1218,7 +1222,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSetSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList, onResolveField, onResolveTraversalField, onColumnDeselectField, onColumnHideField, onColumnApplyFilter, selectedRowIds = null, onToggleRowSelect, onToggleAllRowsSelect, externalRefreshKey = 0, relateTraversalIds = null }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSetSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList, onResolveField, onResolveTraversalField, onResolveFieldWithTemplate, onColumnDeselectField, onColumnHideField, onColumnApplyFilter, selectedRowIds = null, onToggleRowSelect, onToggleAllRowsSelect, externalRefreshKey = 0, relateTraversalIds = null }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -1378,7 +1382,19 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
         return undefined
       }
       onFetchRelatedRecord(selectedTraversal.fieldValue)
-        .then((result) => { if (!cancelled) setTraversalData(result?.record ? [result.record] : []) })
+        .then((result) => {
+          if (cancelled) return
+          if (!result?.record) {
+            setTraversalData([])
+            return
+          }
+          setTraversalData([
+            {
+              ...result.record,
+              _resolveItemPathTemplate: result?.navItem?.itemPathTemplate ?? null,
+            },
+          ])
+        })
         .catch(() => { if (!cancelled) setTraversalData([]) })
         .finally(() => { if (!cancelled) setTraversalLoading(false) })
       return () => { cancelled = true }
@@ -1892,6 +1908,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       onFetchRelation={onFetchRelatedRecord}
                       onResolveField={onResolveField}
                       onResolveTraversalField={onResolveTraversalField}
+                      onResolveFieldWithTemplate={onResolveFieldWithTemplate}
                       onViewRecord={onResolveField && onFetchRelatedRecord ? (record) => {
                         const id = record._id ?? record.id
                         if (!id) return
