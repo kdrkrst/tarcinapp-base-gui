@@ -2337,7 +2337,7 @@ export default function ResourcePage() {
               <>
                 <hr className="border-slate-700" />
                 <div className="space-y-1.5">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Fields</p>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Field Visibility</p>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2" ref={fieldDropdownRef}>
                       <p className="text-[10px] text-slate-500 shrink-0">Retrieved Fields</p>

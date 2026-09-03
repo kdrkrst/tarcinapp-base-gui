@@ -1,16 +1,131 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 
+const LOCAL_ENDPOINT = 'http://localhost:8081'
+
+function decodeBase64Url(value) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4 || 4)) % 4)
+  return atob(padded)
+}
+
+function safeParseJson(value) {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+function parseJwtToken(rawToken) {
+  const parts = rawToken.split('.')
+  if (parts.length !== 3) {
+    throw new Error('Token must be a JWT with 3 segments')
+  }
+
+  const header = safeParseJson(decodeBase64Url(parts[0]))
+  const payload = safeParseJson(decodeBase64Url(parts[1]))
+
+  if (!header || typeof header !== 'object') {
+    throw new Error('Invalid JWT header')
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid JWT payload')
+  }
+
+  if (typeof payload.exp === 'number') {
+    const nowInSeconds = Math.floor(Date.now() / 1000)
+    if (payload.exp <= nowInSeconds) {
+      throw new Error('Token is expired')
+    }
+  }
+
+  return payload
+}
+
+function extractUsername(payload) {
+  return (
+    payload.preferred_username ||
+    payload.username ||
+    payload.user_name ||
+    payload.upn ||
+    payload.email ||
+    payload.name ||
+    payload.sub ||
+    'Unknown'
+  )
+}
+
+function extractRoles(payload) {
+  const roles = []
+
+  const pushRoles = (value) => {
+    if (!value) return
+    if (Array.isArray(value)) {
+      value.forEach((entry) => {
+        if (typeof entry === 'string' && entry.trim()) roles.push(entry.trim())
+      })
+      return
+    }
+    if (typeof value === 'string' && value.trim()) {
+      roles.push(value.trim())
+    }
+  }
+
+  pushRoles(payload.roles)
+  pushRoles(payload.role)
+  pushRoles(payload.authorities)
+  pushRoles(payload.realm_access?.roles)
+
+  if (payload.resource_access && typeof payload.resource_access === 'object') {
+    Object.values(payload.resource_access).forEach((resource) => {
+      pushRoles(resource?.roles)
+    })
+  }
+
+  return [...new Set(roles)]
+}
+
 export default function SetupScreen() {
-  const { connect, connectWithUploadedSpec, oasStatus, oasError, endpoint: storedEndpoint, token: storedToken } = useApp()
-  const [endpoint, setEndpoint] = useState(storedEndpoint ?? 'http://localhost:8081')
+  const { connect, connectWithUploadedSpec, oasStatus, oasError, token: storedToken } = useApp()
+  const [endpointMode, setEndpointMode] = useState('local')
+  const [customEndpoint, setCustomEndpoint] = useState(LOCAL_ENDPOINT)
   const [token, setToken] = useState(storedToken ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef(null)
 
+  const endpoint = endpointMode === 'local' ? LOCAL_ENDPOINT : customEndpoint
+  const tokenValidation = useMemo(() => {
+    const trimmed = token.trim()
+    if (!trimmed) {
+      return { isValid: true, payload: null, username: null, roles: [], error: null }
+    }
+
+    try {
+      const payload = parseJwtToken(trimmed)
+      return {
+        isValid: true,
+        payload,
+        username: extractUsername(payload),
+        roles: extractRoles(payload),
+        error: null,
+      }
+    } catch (err) {
+      return {
+        isValid: false,
+        payload: null,
+        username: null,
+        roles: [],
+        error: err?.message || 'Invalid token',
+      }
+    }
+  }, [token])
+
   async function handleSubmit(e) {
     e.preventDefault()
+    if (!tokenValidation.isValid) return
     setSubmitting(true)
     await connect(endpoint.trim(), token.trim() || null)
     setSubmitting(false)
@@ -18,6 +133,7 @@ export default function SetupScreen() {
 
   async function handleFile(file) {
     if (!file) return
+    if (!tokenValidation.isValid) return
     if (!file.name.toLowerCase().endsWith('.json')) {
       await connectWithUploadedSpec({
         spec: null,
@@ -83,54 +199,96 @@ export default function SetupScreen() {
         </div>
 
         <div className="bg-slate-900 rounded-2xl border border-slate-800 p-8">
-          <h1 className="text-white font-semibold text-xl mb-1">Connect to API</h1>
+          <h1 className="text-white font-semibold text-xl mb-1">Connect to Backend</h1>
           <p className="text-slate-400 text-sm mb-6">
-            Enter your API endpoint, or upload an OpenAPI JSON file. The UI will be generated automatically from the spec.
+            Select an endpoint source or upload an OpenAPI JSON file. The UI will be generated automatically from the spec.
           </p>
-
-          <div
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            className={`mb-5 rounded-xl border-2 border-dashed p-4 text-center transition-colors ${
-              isDragging
-                ? 'border-blue-500 bg-blue-950/20'
-                : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
-            }`}
-          >
-            <p className="text-sm text-slate-300">
-              Drag and drop OpenAPI JSON file here
-            </p>
-            <p className="text-xs text-slate-500 mt-1">or</p>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="mt-2 px-3 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition-colors"
-            >
-              Choose JSON File
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/json,.json"
-              className="hidden"
-              onChange={(e) => handleFile(e.target.files?.[0])}
-            />
-          </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1.5">
                 API Endpoint <span className="text-red-400">*</span>
               </label>
-              <input
-                type="url"
-                value={endpoint}
-                onChange={(e) => setEndpoint(e.target.value)}
-                required
-                placeholder="http://localhost:8081"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-slate-100 text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-              />
+
+              <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-slate-800 border border-slate-700 p-1">
+                <button
+                  type="button"
+                  onClick={() => setEndpointMode('local')}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    endpointMode === 'local'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-300 hover:bg-slate-700/80'
+                  }`}
+                >
+                  Local
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEndpointMode('custom')}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    endpointMode === 'custom'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-300 hover:bg-slate-700/80'
+                  }`}
+                >
+                  Custom
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEndpointMode('file')}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    endpointMode === 'file'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-300 hover:bg-slate-700/80'
+                  }`}
+                >
+                  File
+                </button>
+              </div>
+
+              {endpointMode === 'custom' && (
+                <input
+                  type="url"
+                  value={customEndpoint}
+                  onChange={(e) => setCustomEndpoint(e.target.value)}
+                  required
+                  placeholder={LOCAL_ENDPOINT}
+                  className="mt-3 w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-slate-100 text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                />
+              )}
+
+              {endpointMode === 'file' && (
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  className={`mt-3 rounded-xl border-2 border-dashed p-4 text-center transition-colors ${
+                    isDragging
+                      ? 'border-blue-500 bg-blue-950/20'
+                      : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
+                  }`}
+                >
+                  <p className="text-sm text-slate-300">
+                    Drag and drop OpenAPI JSON file here
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">or</p>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="mt-2 px-3 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition-colors"
+                  >
+                    Choose JSON File
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    className="hidden"
+                    onChange={(e) => handleFile(e.target.files?.[0])}
+                  />
+                </div>
+              )}
+
               <p className="mt-1.5 text-xs text-slate-500">
                 Will fetch{' '}
                 <code className="bg-slate-800 px-1 py-0.5 rounded font-mono">
@@ -151,6 +309,26 @@ export default function SetupScreen() {
                 placeholder="eyJhbGciOiJSUzI1NiJ9…"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-slate-100 text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
               />
+
+              {token.trim() && tokenValidation.isValid && (
+                <div className="mt-2.5 rounded-lg border border-emerald-800 bg-emerald-950/40 p-3">
+                  <p className="text-xs text-emerald-300">
+                    User: <span className="font-medium text-emerald-200">{tokenValidation.username}</span>
+                  </p>
+                  <p className="text-xs text-emerald-300 mt-1">
+                    Roles:{' '}
+                    <span className="font-medium text-emerald-200">
+                      {tokenValidation.roles.length ? tokenValidation.roles.join(', ') : 'No roles found'}
+                    </span>
+                  </p>
+                </div>
+              )}
+
+              {token.trim() && !tokenValidation.isValid && (
+                <p className="mt-2 text-xs text-red-400">
+                  Invalid token: {tokenValidation.error}
+                </p>
+              )}
             </div>
 
             {oasError && (
@@ -164,7 +342,7 @@ export default function SetupScreen() {
 
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || !tokenValidation.isValid}
               className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium text-sm transition-colors"
             >
               {isLoading ? (
@@ -184,8 +362,8 @@ export default function SetupScreen() {
 
         <p className="text-center text-xs text-slate-600 mt-6">
           You can also set{' '}
-          <code className="font-mono">VITE_API_ENDPOINT</code> and{' '}
-          <code className="font-mono">VITE_API_TOKEN</code> environment variables to skip this screen.
+          <code className="font-mono">TAPP_API_ENDPOINT</code> and{' '}
+          <code className="font-mono">TAPP_API_TOKEN</code> environment variables to skip this screen.
         </p>
       </div>
     </div>

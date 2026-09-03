@@ -297,7 +297,7 @@ The `SetupScreen` is shown when no spec is loaded. Users provide:
 
 Alternatively, a local OAS JSON file can be drag-and-dropped to use the UI in offline/spec-only mode.
 
-Configuration is persisted to `localStorage` under the key `tarcinapp_config`. Environment variables `VITE_API_ENDPOINT` and `VITE_API_TOKEN` override stored config.
+Configuration is persisted to `localStorage` under the key `tarcinapp_config`. Environment variables `TAPP_API_ENDPOINT` and `TAPP_API_TOKEN` override stored config.
 
 ---
 

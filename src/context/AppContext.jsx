@@ -38,8 +38,8 @@ function validateOasSpec(spec) {
 
 export function AppProvider({ children }) {
   // Environment variables take priority over stored config (Vite exposes VITE_* vars)
-  const envEndpoint = import.meta.env.VITE_API_ENDPOINT ?? null
-  const envToken = import.meta.env.VITE_API_TOKEN ?? null
+  const envEndpoint = import.meta.env.TAPP_API_ENDPOINT ?? null
+  const envToken = import.meta.env.TAPP_API_TOKEN ?? null
 
   const stored = loadConfig()
 
