@@ -16,6 +16,12 @@
 import { useMemo } from 'react'
 import { exprToTokens, tokensToExpr } from '../../utils/filterExpr'
 
+function formatSetLabel(key) {
+  if (!key) return ''
+  const first = key.charAt(0).toUpperCase()
+  return `${first}${key.slice(1)}`
+}
+
 // ─── Mutation helpers on a flat token list ───────────────────────────────────
 
 /**
@@ -121,17 +127,18 @@ export default function VisualFilterBuilder({ expr, onChange }) {
       <span className="text-slate-700 text-xs shrink-0">›</span>
       {tokens.map((token, i) => {
         if (token.type === 'set') {
+          const setLabel = formatSetLabel(token.key)
           return (
             <span
               key={token.id}
               className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded border text-xs font-mono bg-slate-800 border-slate-600 text-slate-300"
             >
-              set[{token.key}]
+              {setLabel}
               <button
                 type="button"
                 onClick={() => handleRemoveSet(i)}
                 className="opacity-50 hover:opacity-100 transition-opacity ml-0.5"
-                aria-label={`Remove set[${token.key}]`}
+                aria-label={`Remove ${setLabel}`}
               >
                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
