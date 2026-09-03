@@ -1218,7 +1218,7 @@ function fmt(dateStr) {
   })
 }
 
-export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSetSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList, onResolveField, onResolveTraversalField, onColumnDeselectField, onColumnHideField, externalRefreshKey = 0, relateTraversalIds = null }) {
+export default function DataGrid({ columns, data, loading, error, onRefresh, onRowClick, hasValidityDates, onRowDelete, onRowActivate, onRowDeactivate, sortOrder, onSetSortColumn, traversals, onFetchItem, onFetchTraversal, onTraversalPost, onTraversalOpenCreate, onTraversalDeleteAll, onTraversalPatchAll, onFetchRelatedRecord, onTraversalRelateToList, onResolveField, onResolveTraversalField, onColumnDeselectField, onColumnHideField, selectedRowIds = null, onToggleRowSelect, onToggleAllRowsSelect, externalRefreshKey = 0, relateTraversalIds = null }) {
   const [copiedId, setCopiedId] = useState(null)
   const resetCopyTimerRef = useRef(null)
   const [tooltip, setTooltip] = useState(null)
@@ -1299,7 +1299,6 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const [pendingDeleteRow, setPendingDeleteRow] = useState(null)
   const [pendingActivateRow, setPendingActivateRow] = useState(null)
   const [pendingDeactivateRow, setPendingDeactivateRow] = useState(null)
-  const [actionsExpanded, setActionsExpanded] = useState(false)
   const scrollRoRef = useRef(null)
   const scrollContainerRef = useCallback((el) => {
     if (scrollRoRef.current) { scrollRoRef.current.disconnect(); scrollRoRef.current = null }
@@ -1317,7 +1316,6 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const [traversalData, setTraversalData] = useState([])
   const [traversalLoading, setTraversalLoading] = useState(false)
   const [traversalPage, setTraversalPage] = useState(0)
-  const [rowTraversalDropdownOpenId, setRowTraversalDropdownOpenId] = useState(null)
   const [traversalActionModal, setTraversalActionModal] = useState(null) // { type: 'post'|'patch' }
   const [traversalDeleteAllPending, setTraversalDeleteAllPending] = useState(false)
   const [traversalActionLoading, setTraversalActionLoading] = useState(false)
@@ -1331,20 +1329,22 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   const [traversalSortDir, setTraversalSortDir] = useState('ASC')
   const [traversalVisibleFields, setTraversalVisibleFields] = useState(null) // null = all, or Set<string>
   const api = useApiClient()
-  const rowTraversalDropdownRef = useRef(null)
-  const pendingTraversalRef = useRef(null)
   const hasTraversals = traversals?.length > 0
   const expandedRow = data?.find((r, i) => (r._id ?? i) === expandedRowId) ?? null
-
-  const actionColWidth = Math.max(40, [onRowClick, onRowDelete, onRowActivate, onRowDeactivate, hasTraversals ? true : null].filter(Boolean).length * 36)
+  const visibleSelectableIds = data
+    .map((row) => row?._id ?? row?.id)
+    .filter((id) => id !== null && id !== undefined)
+  const selectedVisibleCount = selectedRowIds
+    ? visibleSelectableIds.filter((id) => selectedRowIds.has(id)).length
+    : 0
+  const allVisibleSelected = visibleSelectableIds.length > 0 && selectedVisibleCount === visibleSelectableIds.length
+  const isSelectionEnabled = !!onToggleRowSelect
 
   // Reset expansion state when the expanded row changes
   useEffect(() => {
     setFullRecord(null)
     setFullRecordLoading(false)
-    const pending = pendingTraversalRef.current
-    pendingTraversalRef.current = null
-    setSelectedTraversal(pending)
+    setSelectedTraversal(null)
     setTraversalData([])
     setTraversalPage(0)
   }, [expandedRowId])
@@ -1405,18 +1405,6 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
   // data intentionally omitted
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTraversal, traversalPage, expandedRowId, onFetchTraversal, traversalRefreshKey, externalRefreshKey, onFetchRelatedRecord, traversalStatusFilter, traversalVisibilityFilter, traversalSortField, traversalSortDir])
-
-  // Click-outside: row-level traversal dropdown
-  useEffect(() => {
-    if (rowTraversalDropdownOpenId === null) return undefined
-    const handler = (e) => {
-      if (rowTraversalDropdownRef.current && !rowTraversalDropdownRef.current.contains(e.target)) {
-        setRowTraversalDropdownOpenId(null)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [rowTraversalDropdownOpenId])
 
   const shortId = (id) => {
     if (!id) return '—'
@@ -1668,29 +1656,34 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                     )}
                   </div>
                 )}
+                {isSelectionEnabled && col.key === orderedColumns[0]?.key && (
+                  <div className="absolute left-2.5 top-1/2 -translate-y-1/2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onToggleAllRowsSelect?.(!allVisibleSelected)
+                      }}
+                      className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-all ${
+                        selectedVisibleCount > 0
+                          ? 'opacity-100 border-slate-500 bg-slate-700 text-slate-200'
+                          : 'opacity-0 group-hover:opacity-100 border-slate-600 bg-slate-900 text-slate-500 hover:text-slate-300 hover:border-slate-500'
+                      }`}
+                      title={allVisibleSelected ? 'Clear visible selection' : 'Select visible rows'}
+                      aria-label={allVisibleSelected ? 'Clear visible selection' : 'Select visible rows'}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        readOnly
+                        className="w-3 h-3 accent-slate-500 pointer-events-none"
+                      />
+                    </button>
+                  </div>
+                )}
               </th>
               )
             })}
-            <th className="p-0 sticky right-0 bg-slate-900 border-l border-slate-700/50">
-              <div className="flex items-center justify-center py-3 px-1" style={{ width: 34 }}>
-                <button
-                  onClick={() => setActionsExpanded(v => !v)}
-                  className="flex items-center justify-center w-6 h-6 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-700 transition-colors"
-                  title={actionsExpanded ? 'Collapse actions' : 'Expand actions'}
-                  aria-label={actionsExpanded ? 'Collapse actions' : 'Expand actions'}
-                >
-                  {actionsExpanded ? (
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 19.5l7.5-7.5-7.5-7.5m6 15l7.5-7.5-7.5-7.5" />
-                    </svg>
-                  ) : (
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800">
@@ -1698,6 +1691,8 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
             const status = hasValidityDates ? computeRowStatus(row) : null
             const rowId = row._id ?? i
             const isExpanded = expandedRowId === rowId
+            const selectableId = row?._id ?? row?.id
+            const isSelected = selectableId !== null && selectableId !== undefined && selectedRowIds?.has(selectableId)
             return (
             <Fragment key={rowId}>
             <tr
@@ -1707,9 +1702,9 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
               {orderedColumns.map((col, colIdx) => (
                 <td
                   key={col.key}
-                  className="px-4 py-3 text-slate-300 whitespace-nowrap max-w-[220px] truncate"
+                  className="px-4 py-3 text-slate-300 whitespace-nowrap max-w-[220px] truncate relative"
                   style={colIdx === 0 && status ? {
-                    boxShadow: `inset ${hoveredRow === i ? 7 : 4}px 0 0 ${STATUS_SHADOW_COLOR[status]}`,
+                    boxShadow: `inset 4px 0 0 ${STATUS_SHADOW_COLOR[status]}`,
                     transition: 'box-shadow 150ms ease',
                   } : undefined}
                   onMouseEnter={colIdx === 0 && status ? (e) => {
@@ -1722,6 +1717,29 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                     setTooltip(null)
                   } : undefined}
                 >
+                  {isSelectionEnabled && colIdx === 0 && selectableId !== null && selectableId !== undefined && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onToggleRowSelect(selectableId)
+                      }}
+                      className={`absolute left-2.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-4 h-4 rounded border transition-all duration-150 ${
+                        isSelected
+                          ? 'opacity-100 translate-x-0 border-slate-500 bg-slate-700 text-slate-200'
+                          : 'opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 border-slate-600 bg-slate-900 text-slate-500 hover:text-slate-300 hover:border-slate-500'
+                      }`}
+                      title={isSelected ? 'Deselect row' : 'Select row'}
+                      aria-label={isSelected ? 'Deselect row' : 'Select row'}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!isSelected}
+                        readOnly
+                        className="w-3 h-3 accent-slate-500 pointer-events-none"
+                      />
+                    </button>
+                  )}
                   {col.render
                     ? col.render(row[col.key], row)
                     : RELATIVE_DATE_KEYS.has(col.key) && row[col.key]
@@ -1783,117 +1801,10 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                       })()}
                 </td>
               ))}
-              <td className="p-0 text-center sticky right-0 bg-slate-900 group-hover:bg-slate-800 border-l border-slate-700/50">
-                <div
-                  className="overflow-hidden transition-all duration-200 ease-in-out"
-                  style={{
-                    maxWidth: actionsExpanded ? `${actionColWidth + 16}px` : '0px',
-                    padding: actionsExpanded ? '12px 8px' : '12px 0px',
-                  }}
-                >
-                <div className="flex items-center justify-center gap-1">
-                {(onRowActivate || (onRowDeactivate && computeRowStatus(row) === 'active')) && (
-                  <div className="inline-flex rounded-md border border-slate-700 overflow-hidden">
-                    {onRowActivate && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setPendingActivateRow(row) }}
-                        className="p-1.5 text-slate-600 hover:text-emerald-400 hover:bg-emerald-900/30 transition-colors"
-                        title={row._validFromDateTime && row._validUntilDateTime ? 'Reactivate (clear valid-until date)' : 'Activate (set valid from now)'}
-                        aria-label={row._validFromDateTime && row._validUntilDateTime ? 'Reactivate' : 'Activate'}
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      </button>
-                    )}
-                    {onRowActivate && onRowDeactivate && computeRowStatus(row) === 'active' && (
-                      <span className="w-px bg-slate-700 self-stretch" />
-                    )}
-                    {onRowDeactivate && computeRowStatus(row) === 'active' && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setPendingDeactivateRow(row) }}
-                        className="p-1.5 text-slate-600 hover:text-amber-400 hover:bg-amber-900/30 transition-colors"
-                        title="Deactivate (set valid until now)"
-                        aria-label="Deactivate"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                )}
-                {onRowClick && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onRowClick(row) }}
-                    className="p-1.5 rounded-lg text-slate-600 hover:text-sky-400 hover:bg-sky-900/30 transition-colors"
-                    title="Edit record"
-                    aria-label="Edit record"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                    </svg>
-                  </button>
-                )}
-                {hasTraversals && (
-                  <div className="relative" ref={rowTraversalDropdownOpenId === rowId ? rowTraversalDropdownRef : null}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setRowTraversalDropdownOpenId(rowTraversalDropdownOpenId === rowId ? null : rowId)
-                      }}
-                      className="p-1.5 rounded-lg text-slate-600 hover:text-violet-400 hover:bg-violet-900/30 transition-colors"
-                      title="Browse related items"
-                      aria-label="Browse related items"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-                      </svg>
-                    </button>
-                    {rowTraversalDropdownOpenId === rowId && (
-                      <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
-                        {traversals.map((t) => (
-                          <button
-                            key={t.subResource}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              if (expandedRowId === rowId) {
-                                setSelectedTraversal(t)
-                                setTraversalPage(0)
-                              } else {
-                                pendingTraversalRef.current = t
-                                setExpandedRowId(rowId)
-                              }
-                              setRowTraversalDropdownOpenId(null)
-                            }}
-                            className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
-                          >
-                            {t.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {onRowDelete && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setPendingDeleteRow(row) }}
-                    className="p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-900/30 transition-colors"
-                    title="Delete record"
-                    aria-label="Delete record"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                    </svg>
-                  </button>
-                )}
-                </div>
-                </div>
-              </td>
             </tr>
             {isExpanded && (
               <tr>
-                <td colSpan={columns.length + 1} className="p-0 border-b border-slate-700">
+                <td colSpan={columns.length} className="p-0 border-b border-slate-700">
                   <div style={{ position: 'sticky', left: 0, width: 'var(--cw, 100%)' }}>
                     <ExpandedRowPanel
                       row={row}

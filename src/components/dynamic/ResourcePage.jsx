@@ -7,6 +7,7 @@ import { useResourceList } from '../../hooks/useResourceList'
 import DataGrid from '../ui/DataGrid'
 import Toast from '../ui/Toast'
 import VisualFilterBuilder from '../ui/VisualFilterBuilder'
+import ConfirmDialog from '../ui/ConfirmDialog'
 import { buildFilterExprQuery, buildBlockFromKeys, appendBlock, makeOr, makeSet } from '../../utils/filterExpr'
 
 function buildItemPath(template, id) {
@@ -19,6 +20,12 @@ function formatQueryPreview(queryString) {
     entries.push(value === '' ? key : `${key}=${value}`)
   })
   return entries.length ? `?${entries.join('&')}` : ''
+}
+
+function shortId(id) {
+  if (!id) return '—'
+  if (id.length <= 14) return id
+  return `${id.slice(0, 6)}...${id.slice(-4)}`
 }
 
 /**
@@ -116,16 +123,22 @@ function loadResourceFieldPrefs(resourceKey) {
     const mode = ['all', 'exclude', 'none', 'include'].includes(entry.mode) ? entry.mode : 'all'
     const selected = Array.isArray(entry.selected) ? new Set(entry.selected) : new Set()
     const hidden = Array.isArray(entry.hidden) ? new Set(entry.hidden) : new Set()
+    const hiddenRecordIds = Array.isArray(entry.hiddenRecordIds) ? new Set(entry.hiddenRecordIds) : new Set()
+    const hiddenRecordMeta = entry.hiddenRecordMeta && typeof entry.hiddenRecordMeta === 'object' ? entry.hiddenRecordMeta : {}
+    const hideMarkedRows = entry.hideMarkedRows !== false
     return {
       fieldSelectorState: { mode, selected },
       hiddenFields: hidden,
+      hiddenRecordIds,
+      hiddenRecordMeta,
+      hideMarkedRows,
     }
   } catch {
     return null
   }
 }
 
-function saveResourceFieldPrefs(resourceKey, fieldSelectorState, hiddenFields) {
+function saveResourceFieldPrefs(resourceKey, fieldSelectorState, hiddenFields, hiddenRecordIds, hiddenRecordMeta, hideMarkedRows) {
   if (!resourceKey) return
   try {
     const raw = window.sessionStorage.getItem(RESOURCE_FIELD_PREFS_SESSION_KEY)
@@ -134,6 +147,9 @@ function saveResourceFieldPrefs(resourceKey, fieldSelectorState, hiddenFields) {
       mode: fieldSelectorState.mode,
       selected: [...fieldSelectorState.selected],
       hidden: [...hiddenFields],
+      hiddenRecordIds: [...hiddenRecordIds],
+      hiddenRecordMeta,
+      hideMarkedRows,
     }
     window.sessionStorage.setItem(RESOURCE_FIELD_PREFS_SESSION_KEY, JSON.stringify(parsed))
   } catch {
@@ -643,6 +659,19 @@ export default function ResourcePage() {
   const [fieldSearch, setFieldSearch] = useState('')
   const [hiddenFieldSearch, setHiddenFieldSearch] = useState('')
   const [hiddenFields, setHiddenFields] = useState(new Set())
+  const [selectedRowIds, setSelectedRowIds] = useState(new Set())
+  const [hiddenRecordIds, setHiddenRecordIds] = useState(new Set())
+  const [hiddenRecordMeta, setHiddenRecordMeta] = useState({})
+  const [hideMarkedRows, setHideMarkedRows] = useState(true)
+  const [pendingBulkAction, setPendingBulkAction] = useState(null)
+  const [bulkProgress, setBulkProgress] = useState({
+    running: false,
+    action: null,
+    total: 0,
+    processed: 0,
+    failed: 0,
+    currentLabel: '',
+  })
 
   const paginationKeys = useMemo(
     () => resolvePaginationQueryKeys(oasSpec, navItem?.collectionPath, 'get'),
@@ -675,10 +704,17 @@ export default function ResourcePage() {
     if (savedPrefs) {
       setFieldSelectorState(savedPrefs.fieldSelectorState)
       setHiddenFields(savedPrefs.hiddenFields)
+      setHiddenRecordIds(savedPrefs.hiddenRecordIds ?? new Set())
+      setHiddenRecordMeta(savedPrefs.hiddenRecordMeta ?? {})
+      setHideMarkedRows(savedPrefs.hideMarkedRows ?? true)
     } else {
       setFieldSelectorState({ mode: 'all', selected: new Set() })
       setHiddenFields(new Set())
+      setHiddenRecordIds(new Set())
+      setHiddenRecordMeta({})
+      setHideMarkedRows(true)
     }
+    setSelectedRowIds(new Set())
     setSelectedQ(null)
     setSelectedFieldset(null)
     setSortOrder([])
@@ -689,8 +725,8 @@ export default function ResourcePage() {
 
   useEffect(() => {
     if (!resourcePrefsKey) return
-    saveResourceFieldPrefs(resourcePrefsKey, fieldSelectorState, hiddenFields)
-  }, [resourcePrefsKey, fieldSelectorState, hiddenFields])
+    saveResourceFieldPrefs(resourcePrefsKey, fieldSelectorState, hiddenFields, hiddenRecordIds, hiddenRecordMeta, hideMarkedRows)
+  }, [resourcePrefsKey, fieldSelectorState, hiddenFields, hiddenRecordIds, hiddenRecordMeta, hideMarkedRows])
 
   useEffect(() => {
     if (!qDropdownOpen) return undefined
@@ -1161,6 +1197,143 @@ export default function ResourcePage() {
     return all.filter((col) => isFieldChecked(col.key, fieldSelectorState) && !hiddenFields.has(col.key))
   }, [data, fieldSelectorState, hiddenFields])
 
+  const visibleData = useMemo(() => {
+    if (!hideMarkedRows || hiddenRecordIds.size === 0) return data
+    return data.filter((row) => {
+      const id = row?._id ?? row?.id
+      return !id || !hiddenRecordIds.has(id)
+    })
+  }, [data, hiddenRecordIds, hideMarkedRows])
+
+  useEffect(() => {
+    setSelectedRowIds((prev) => {
+      if (prev.size === 0) return prev
+      const visibleIds = new Set(
+        data
+          .map((row) => row?._id ?? row?.id)
+          .filter((id) => id !== null && id !== undefined && !hiddenRecordIds.has(id))
+      )
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [data, hiddenRecordIds])
+
+  const selectedRows = useMemo(() => {
+    if (selectedRowIds.size === 0) return []
+    return data.filter((row) => selectedRowIds.has(row?._id ?? row?.id))
+  }, [data, selectedRowIds])
+
+  useEffect(() => {
+    if (hiddenRecordIds.size === 0 || data.length === 0) return
+    setHiddenRecordMeta((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const row of data) {
+        const id = row?._id ?? row?.id
+        if (!id || !hiddenRecordIds.has(id)) continue
+        if (next[id]?.name) continue
+        if (row?._name) {
+          next[id] = { name: String(row._name) }
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [data, hiddenRecordIds])
+
+  const runBulkMutation = useCallback(async ({ action, rows, mutateRow, fallbackErrorMessage }) => {
+    if (!rows || rows.length === 0) return
+    let failed = 0
+    setToastError(null)
+    setBulkProgress({ running: true, action, total: rows.length, processed: 0, failed: 0, currentLabel: '' })
+    for (let idx = 0; idx < rows.length; idx += 1) {
+      const row = rows[idx]
+      const id = row?._id ?? row?.id
+      const label = row?._name ? String(row._name) : shortId(id)
+      setBulkProgress((prev) => ({ ...prev, processed: idx + 1, currentLabel: label }))
+      try {
+        await mutateRow(row)
+      } catch {
+        failed += 1
+        setBulkProgress((prev) => ({ ...prev, failed }))
+      }
+    }
+    await refresh()
+    setSelectedRowIds(new Set())
+    setBulkProgress((prev) => ({ ...prev, running: false, currentLabel: '' }))
+    if (failed > 0) {
+      setToastError(`${failed} of ${rows.length} operation(s) failed${fallbackErrorMessage ? `: ${fallbackErrorMessage}` : ''}`)
+    }
+  }, [refresh])
+
+  const handleBulkActivate = useCallback(async () => {
+    if (!canActivate || !navItem?.itemPathTemplate) return
+    await runBulkMutation({
+      action: 'activate',
+      rows: selectedRows,
+      mutateRow: async (row) => {
+      const id = row?._id ?? row?.id
+      if (!id) return
+      const bothEmpty = !row._validFromDateTime && !row._validUntilDateTime
+      const payload = bothEmpty
+        ? { _validFromDateTime: new Date().toISOString() }
+        : { _validUntilDateTime: null }
+      await patch(buildItemPath(navItem.itemPathTemplate, id), payload)
+      },
+      fallbackErrorMessage: 'activate failed',
+    })
+  }, [canActivate, navItem?.itemPathTemplate, runBulkMutation, patch, selectedRows])
+
+  const handleBulkDeactivate = useCallback(async () => {
+    if (!canDeactivate || !navItem?.itemPathTemplate) return
+    await runBulkMutation({
+      action: 'deactivate',
+      rows: selectedRows,
+      mutateRow: async (row) => {
+      const id = row?._id ?? row?.id
+      if (!id) return
+      await patch(buildItemPath(navItem.itemPathTemplate, id), { _validUntilDateTime: new Date().toISOString() })
+      },
+      fallbackErrorMessage: 'deactivate failed',
+    })
+  }, [canDeactivate, navItem?.itemPathTemplate, runBulkMutation, patch, selectedRows])
+
+  const handleBulkDelete = useCallback(async () => {
+    if (!canDeleteItem || !navItem?.itemPathTemplate) return
+    await runBulkMutation({
+      action: 'delete',
+      rows: selectedRows,
+      mutateRow: async (row) => {
+      const id = row?._id ?? row?.id
+      if (!id) return
+      await del(buildItemPath(navItem.itemPathTemplate, id))
+      },
+      fallbackErrorMessage: 'delete failed',
+    })
+  }, [canDeleteItem, navItem?.itemPathTemplate, runBulkMutation, del, selectedRows])
+
+  const handleBulkHide = useCallback(async () => {
+    if (selectedRows.length === 0) return
+    const idsToHide = new Set()
+    const metaToHide = {}
+    await runBulkMutation({
+      action: 'hide',
+      rows: selectedRows,
+      mutateRow: async (row) => {
+        const id = row?._id ?? row?.id
+        if (!id) return
+        idsToHide.add(id)
+        metaToHide[id] = { name: row?._name ? String(row._name) : '' }
+      },
+      fallbackErrorMessage: '',
+    })
+    setHiddenRecordIds((prev) => new Set([...prev, ...idsToHide]))
+    setHiddenRecordMeta((prev) => ({ ...prev, ...metaToHide }))
+  }, [selectedRows, runBulkMutation])
+
+  const selectedCount = selectedRowIds.size
+  const bulkProgressPct = bulkProgress.total > 0 ? Math.round((bulkProgress.processed / bulkProgress.total) * 100) : 0
+
   const hasNextPage = data.length === pageSize
 
   const fullRequestUrl = `${endpoint ?? ''}${navItem?.collectionPath ?? ''}${querySummary}`
@@ -1301,6 +1474,62 @@ export default function ResourcePage() {
           </div>
         )}
 
+        {selectedCount > 0 && (
+          <div className="inline-flex items-center rounded-lg border border-slate-700 divide-x divide-slate-700 overflow-hidden bg-slate-800">
+            <span className="px-2.5 py-2 text-[11px] text-slate-300 font-medium">
+              {selectedCount} selected
+            </span>
+            <button
+              type="button"
+              onClick={() => setPendingBulkAction('activate')}
+              disabled={!canActivate || bulkProgress.running}
+              className="px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title={canActivate ? 'Activate selected records' : 'Activate is not supported on this resource'}
+            >
+              Activate
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingBulkAction('deactivate')}
+              disabled={!canDeactivate || bulkProgress.running}
+              className="px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title={canDeactivate ? 'Deactivate selected records' : 'Deactivate is not supported on this resource'}
+            >
+              Deactivate
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingBulkAction('hide')}
+              disabled={bulkProgress.running}
+              className="px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Hide selected records in this UI"
+            >
+              Hide
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingBulkAction('delete')}
+              disabled={!canDeleteItem || bulkProgress.running}
+              className="px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title={canDeleteItem ? 'Delete selected records' : 'Delete is not supported on this resource'}
+            >
+              Delete
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedRowIds(new Set())}
+              disabled={bulkProgress.running}
+              className="px-2 py-2 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Clear selection"
+              aria-label="Clear selection"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Right: action buttons */}
         <div className="ml-auto inline-flex rounded-lg border border-slate-700 divide-x divide-slate-700 overflow-hidden">
           {/* Filter */}
@@ -1311,6 +1540,7 @@ export default function ResourcePage() {
               filterBuilderExpr !== null,
               fieldSelectorState.mode !== 'all',
               hiddenFields.size > 0,
+              hiddenRecordIds.size > 0,
               sortOrder.length > 0,
             ].filter(Boolean).length
             return (
@@ -1376,6 +1606,30 @@ export default function ResourcePage() {
         </div>
       </div>
 
+      {bulkProgress.running && (
+        <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-slate-300">
+              {bulkProgress.action === 'activate' && 'Activating selected records...'}
+              {bulkProgress.action === 'deactivate' && 'Deactivating selected records...'}
+              {bulkProgress.action === 'hide' && 'Hiding selected records...'}
+              {bulkProgress.action === 'delete' && 'Deleting selected records...'}
+            </span>
+            <span className="text-slate-500 font-mono">
+              {bulkProgress.processed}/{bulkProgress.total}
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 w-full rounded bg-slate-800 overflow-hidden">
+            <div className="h-full bg-slate-500 transition-all duration-200" style={{ width: `${bulkProgressPct}%` }} />
+          </div>
+          {bulkProgress.currentLabel && (
+            <p className="mt-1 text-[11px] text-slate-500 truncate" title={bulkProgress.currentLabel}>
+              Current: {bulkProgress.currentLabel}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* ── Filter panel ── */}
       {filterPanelOpen && (
         <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-4">
@@ -1384,9 +1638,9 @@ export default function ResourcePage() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-200">Filters</p>
             <div className="flex items-center gap-3">
-              {[selectedQ !== null, selectedFieldset !== null, filterBuilderExpr !== null, fieldSelectorState.mode !== 'all', hiddenFields.size > 0, sortOrder.length > 0].some(Boolean) && (
+              {[selectedQ !== null, selectedFieldset !== null, filterBuilderExpr !== null, fieldSelectorState.mode !== 'all', hiddenFields.size > 0, hiddenRecordIds.size > 0, sortOrder.length > 0].some(Boolean) && (
                 <button
-                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setFilterBuilderExpr(null); setStagedSetKeys([]); setStagedSetMeta({}); setFieldSelectorState({ mode: 'all', selected: new Set() }); setHiddenFields(new Set()); setSortOrder([]); setPage(0) }}
+                  onClick={() => { setSelectedQ(null); setSelectedFieldset(null); setFilterBuilderExpr(null); setStagedSetKeys([]); setStagedSetMeta({}); setFieldSelectorState({ mode: 'all', selected: new Set() }); setHiddenFields(new Set()); setHiddenRecordIds(new Set()); setHiddenRecordMeta({}); setSortOrder([]); setPage(0) }}
                   className="text-xs text-slate-400 hover:text-blue-400 transition-colors"
                 >
                   Clear all
@@ -2130,6 +2384,82 @@ export default function ResourcePage() {
               </div>
             </>
           )}
+
+          <hr className="border-slate-700" />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Row Visibility</p>
+              <span className="text-[10px] text-slate-500 font-mono">
+                hidden ids: {hiddenRecordIds.size}
+              </span>
+            </div>
+
+            <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setHideMarkedRows(true)}
+                className={`px-3 py-1.5 text-xs transition-colors ${hideMarkedRows ? 'bg-slate-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'}`}
+              >
+                Hide marked rows
+              </button>
+              <span className="w-px bg-slate-700" />
+              <button
+                type="button"
+                onClick={() => setHideMarkedRows(false)}
+                className={`px-3 py-1.5 text-xs transition-colors ${!hideMarkedRows ? 'bg-slate-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'}`}
+              >
+                Show all rows
+              </button>
+            </div>
+
+            {hiddenRecordIds.size === 0 ? (
+              <p className="text-xs text-slate-500">No hidden records.</p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-1.5">
+                  {[...hiddenRecordIds].map((id) => (
+                    <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[10px] text-slate-300" title={id}>
+                      <span className="max-w-[220px] truncate">{hiddenRecordMeta[id]?.name || 'no _name'}</span>
+                      <span className="text-slate-500 font-mono">{shortId(id)}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHiddenRecordIds((prev) => {
+                            const next = new Set(prev)
+                            next.delete(id)
+                            return next
+                          })
+                          setHiddenRecordMeta((prev) => {
+                            if (!(id in prev)) return prev
+                            const next = { ...prev }
+                            delete next[id]
+                            return next
+                          })
+                        }}
+                        className="text-slate-500 hover:text-slate-200"
+                        title="Unhide record"
+                        aria-label="Unhide record"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHiddenRecordIds(new Set())
+                    setHiddenRecordMeta({})
+                  }}
+                  className="text-xs text-slate-400 hover:text-slate-200 underline"
+                >
+                  Unhide all records
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -2625,7 +2955,7 @@ export default function ResourcePage() {
       <div className="overflow-x-auto">
         <DataGrid
           columns={columns}
-          data={data}
+          data={visibleData}
           loading={loading}
           error={error}
           onRefresh={refresh}
@@ -2649,6 +2979,27 @@ export default function ResourcePage() {
           onTraversalRelateToList={handleTraversalRelateToList}
           onColumnDeselectField={handleDeselectFieldFromColumn}
           onColumnHideField={handleHideFieldFromColumn}
+          selectedRowIds={selectedRowIds}
+          onToggleRowSelect={(id) => {
+            setSelectedRowIds((prev) => {
+              const next = new Set(prev)
+              if (next.has(id)) next.delete(id)
+              else next.add(id)
+              return next
+            })
+          }}
+          onToggleAllRowsSelect={(selectAll) => {
+            setSelectedRowIds((prev) => {
+              const next = new Set(prev)
+              for (const row of visibleData) {
+                const id = row?._id ?? row?.id
+                if (id === null || id === undefined) continue
+                if (selectAll) next.add(id)
+                else next.delete(id)
+              }
+              return next
+            })
+          }}
           relateTraversalIds={relateTraversalIds}
           externalRefreshKey={traversalRefreshSignal}
         />
@@ -2706,6 +3057,55 @@ export default function ResourcePage() {
       </div>
 
       <Toast message={toastError} onClose={() => setToastError(null)} type="error" />
+
+      <ConfirmDialog
+        open={pendingBulkAction === 'activate'}
+        title="Activate selected records?"
+        message={`This will process ${selectedCount} selected record(s) one-by-one.`}
+        confirmLabel="Yes, activate"
+        confirmVariant="success"
+        onConfirm={async () => {
+          setPendingBulkAction(null)
+          await handleBulkActivate()
+        }}
+        onCancel={() => setPendingBulkAction(null)}
+      />
+      <ConfirmDialog
+        open={pendingBulkAction === 'deactivate'}
+        title="Deactivate selected records?"
+        message={`This will process ${selectedCount} selected record(s) one-by-one.`}
+        confirmLabel="Yes, deactivate"
+        confirmVariant="warning"
+        onConfirm={async () => {
+          setPendingBulkAction(null)
+          await handleBulkDeactivate()
+        }}
+        onCancel={() => setPendingBulkAction(null)}
+      />
+      <ConfirmDialog
+        open={pendingBulkAction === 'hide'}
+        title="Hide selected records?"
+        message={`This will hide ${selectedCount} selected record(s) from this UI only.`}
+        confirmLabel="Yes, hide"
+        confirmVariant="warning"
+        onConfirm={async () => {
+          setPendingBulkAction(null)
+          await handleBulkHide()
+        }}
+        onCancel={() => setPendingBulkAction(null)}
+      />
+      <ConfirmDialog
+        open={pendingBulkAction === 'delete'}
+        title="Delete selected records?"
+        message={`This will delete ${selectedCount} selected record(s) one-by-one. This cannot be undone.`}
+        confirmLabel="Yes, delete"
+        confirmVariant="danger"
+        onConfirm={async () => {
+          setPendingBulkAction(null)
+          await handleBulkDelete()
+        }}
+        onCancel={() => setPendingBulkAction(null)}
+      />
       </div>
 
       {queryInfoOpen && (
