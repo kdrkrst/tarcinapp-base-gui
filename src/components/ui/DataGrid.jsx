@@ -1600,7 +1600,7 @@ export default function DataGrid({ columns, data, loading, error, onRefresh, onR
                 {openColumnMenuKey === col.key && (onSetSortColumn || onColumnApplyFilter || onColumnDeselectField || onColumnHideField) && (
                   <div
                     ref={columnMenuRef}
-                    className="absolute right-0 top-full mt-1 z-[120] min-w-[190px] rounded-lg border border-slate-700 bg-slate-900 shadow-xl overflow-hidden"
+                    className={`absolute top-full mt-1 z-[120] min-w-[190px] rounded-lg border border-slate-700 bg-slate-900 shadow-xl overflow-hidden ${col.key === orderedColumns[0]?.key ? 'left-0' : 'right-0'}`}
                     onClick={(e) => e.stopPropagation()}
                   >
                     {onSetSortColumn && (
